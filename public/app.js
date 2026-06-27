@@ -224,10 +224,11 @@ function renderLanding(){
     <div class="method" id="methods">
       <h3>How Artha HE is built</h3>
       <p>Every number is produced with <b style="color:#fff">validated, published health-economics formulae</b> — the same methods implemented in the standard R toolchain (<b style="color:#fff">hesim, heemod, dampack, BCEA</b>). That includes discounting and half-cycle correction, ICER and dominance logic, probabilistic sensitivity analysis with Beta / Gamma / Lognormal distributions, cost-effectiveness acceptability curves and expected value of perfect information. Defaults follow Indian / LMIC reference cases (GDP-based willingness-to-pay, 3% discounting) and reporting aligns with the CHEERS 2022 checklist.</p>
-      <div class="badges"><span class="badge">R-equivalent methods</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">India reference case</span></div>
+      <div class="badges"><span class="badge">Private compute engine</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">India reference case</span></div>
+      <p style="margin-top:18px;color:#fff;font-size:14px"><b>Developed by Dr G Hari Prakash</b></p>
     </div>
     <div style="text-align:center;margin-top:36px"><button class="btn btn-primary btn-lg" id="enterBottom">Enter the Workbench →</button></div>
-    <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching</footer>
+    <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching<br><b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
   </div>`;
   const enter=()=>enterApp("costing");
   document.getElementById("enterTop").onclick=enter;
@@ -248,7 +249,7 @@ function renderCostingSidebar(){
     <div class="seg" id="costMethod"><button data-v="micro" class="${c.method==="micro"?"active":""}">Micro-costing</button><button data-v="gross" class="${c.method==="gross"?"active":""}">Gross-costing</button></div>
     <div id="microC" style="display:${c.method==="micro"?"block":"none"}">
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
-      <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
+      <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><button class="btn btn-ghost sm" id="clearRows">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
       <div class="field"><label>Express all costs in price year</label><input type="number" id="toYear" value="${c.toYear}"></div>
       <div class="field"><label>Annual inflation <span class="lab-val" id="inflLab">${pct(c.inflation)}</span></label><input type="range" id="infl" min="0" max="15" step="0.5" value="${c.inflation*100}"></div></div>
     <div id="grossC" style="display:${c.method==="gross"?"block":"none"}">
@@ -259,6 +260,7 @@ function renderCostingSidebar(){
   document.querySelectorAll("#costRows [data-f]").forEach(el=>el.onchange=()=>c.rows[+el.dataset.i][el.dataset.f]=el.value);
   document.querySelectorAll("#costRows .row-del").forEach(el=>el.onclick=()=>{c.rows.splice(+el.dataset.del,1);renderCostingSidebar();});
   const a=document.getElementById("addRow");if(a)a.onclick=()=>{c.rows.push({item:"New item",category:"Direct medical",quantity:1,unit_cost:0,year:c.toYear});renderCostingSidebar();};
+  const clr=document.getElementById("clearRows");if(clr)clr.onclick=()=>{c.rows=[];renderCostingSidebar();renderCosting();};
   const inf=document.getElementById("infl");if(inf)inf.oninput=()=>{c.inflation=+inf.value/100;document.getElementById("inflLab").textContent=pct(c.inflation);};
   const ty=document.getElementById("toYear");if(ty)ty.onchange=()=>c.toYear=+ty.value;
   const tc=document.getElementById("totalCost");if(tc)tc.onchange=()=>c.totalCost=+tc.value;
@@ -292,13 +294,14 @@ function renderOopSidebar(){
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">02</span> Out-of-Pocket</h2>
     <p class="hint">What the patient/household pays directly for one illness episode — and whether it is <b>catastrophic</b>.</p>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>₹ Amount</th><th></th></tr></thead><tbody id="oopRows">${rows}</tbody></table></div>
-    <div class="btn-row"><button class="btn btn-secondary sm" id="addOop">+ Add item</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="oopFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplOop">Template</button></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addOop">+ Add item</button><button class="btn btn-ghost sm" id="clearOop">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="oopFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplOop">Template</button></div>
     <div class="field"><label>Annual household income (₹)</label><input type="number" id="income" value="${o.income}"></div>
     <div class="field"><label>Annual non-food / capacity-to-pay (₹)</label><input type="number" id="nonFood" value="${o.nonFood}"></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="calcOop">Calculate</button>`;
   document.querySelectorAll("#oopRows [data-f]").forEach(el=>el.onchange=()=>o.items[+el.dataset.i][el.dataset.f]=el.dataset.f==="amount"?+el.value:el.value);
   document.querySelectorAll("#oopRows .row-del").forEach(el=>el.onclick=()=>{o.items.splice(+el.dataset.del,1);renderOopSidebar();});
   document.getElementById("addOop").onclick=()=>{o.items.push({item:"New item",category:"Direct medical",amount:0});renderOopSidebar();};
+  document.getElementById("clearOop").onclick=()=>{o.items=[];renderOopSidebar();renderOop();};
   document.getElementById("income").onchange=e=>o.income=+e.target.value;
   document.getElementById("nonFood").onchange=e=>o.nonFood=+e.target.value;
   document.getElementById("tplOop").onclick=()=>dlTemplate("oop");
@@ -341,7 +344,7 @@ function renderEvalSidebar(){
       <div id="advOut"></div></div>
     <div class="callout"><b>${t.abbr} — ${t.name}.</b> ${t.def}</div>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Strategy</th><th>Cost ₹</th><th>${e.type==="CBA"?"Benefit ₹":e.type==="CUA"?"QALYs":"Effect"}</th><th></th></tr></thead><tbody id="evalRows">${rows}</tbody></table></div>
-    <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Add</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="evalFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplEval">Template</button></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Add</button><button class="btn btn-ghost sm" id="clearStrat">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="evalFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplEval">Template</button></div>
     ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="1000000" step="25000" value="${e.wtp}"></div><p class="hint" style="margin-top:-6px">1× GDP ≈ ${fmtINR(GDP_PC)} · 3× GDP ≈ ${fmtINR(GDP_PC*3)}</p>`:""}
     <div class="divider"></div><button class="btn btn-primary btn-block" id="analyseBtn">Analyse</button>`;
   document.querySelectorAll("#evalType button").forEach(b=>b.onclick=()=>{e.type=b.dataset.t;renderEvalSidebar();renderEval();});
@@ -349,6 +352,7 @@ function renderEvalSidebar(){
   document.querySelectorAll("#evalRows [data-f]").forEach(el=>el.onchange=()=>e.strats[+el.dataset.i][el.dataset.f]=el.dataset.f==="strategy"?el.value:+el.value);
   document.querySelectorAll("#evalRows .row-del").forEach(el=>el.onclick=()=>{e.strats.splice(+el.dataset.del,1);renderEvalSidebar();});
   document.getElementById("addStrat").onclick=()=>{e.strats.push({strategy:"New strategy",cost:0,effect:0});renderEvalSidebar();};
+  document.getElementById("clearStrat").onclick=()=>{e.strats=[];renderEvalSidebar();renderEval();};
   document.getElementById("tplEval").onclick=()=>dlTemplate("evaluation");
   document.getElementById("evalFile").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{e.strats=parseCSV(rd.result).map(r=>({strategy:r.strategy,cost:+r.cost,effect:+r.effect}));renderEvalSidebar();renderEval();};rd.readAsText(f);};
   const w=document.getElementById("wtp");if(w)w.oninput=()=>{e.wtp=+w.value;document.getElementById("wtpLab").textContent=compactINR(+w.value);};
@@ -572,7 +576,7 @@ async function renderMethods(){
     <h2 class="sec">Glossary</h2>
     <p class="secsub">Plain-language definitions — hover the dotted terms anywhere in the app to see these.</p>
     <div class="card glossary"><dl>${glos}</dl></div>
-    <footer class="foot">Artha HE · for research &amp; teaching</footer>
+    <footer class="foot">Artha HE · for research &amp; teaching · <b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
   </div>`;
 }
 
