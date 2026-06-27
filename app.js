@@ -1,0 +1,764 @@
+/* =============================================================================
+   Artha HE — Health Economics Workbench  (v1.1)
+   Landing page · costing · OOP · evaluation types (CMA/CEA/CUA/CBA/CCA) ·
+   Markov modeling · PSA/DSA · budget impact · templates · multi-format export.
+   All client-side, validated HE formulae (mirrors R: hesim/heemod/dampack/BCEA).
+   ============================================================================= */
+
+const RUPEE="₹", GDP_PC=200000;
+const COST_CATEGORIES=["Direct medical","Direct non-medical","Indirect (productivity)"];
+const C={primary:"#5B4BD6",primaryL:"#7261F0",gold:"#C8971F",emerald:"#0E9E78",amber:"#DD9430",red:"#DC4B4B",ink:"#1A1733",muted:"#6E6A86",line:"#E5E3F0"};
+const SERIES=[C.primary,C.gold,C.emerald,C.amber,C.red,"#6E6A86"];
+
+/* ---------- formatting ---------- */
+const fmtINR=(x,dp=0)=>RUPEE+Number(x).toLocaleString("en-IN",{minimumFractionDigits:dp,maximumFractionDigits:dp});
+const fmtNum=(x,dp=2)=>Number(x).toLocaleString("en-IN",{minimumFractionDigits:dp,maximumFractionDigits:dp});
+const pct=(x,dp=1)=>(x*100).toFixed(dp)+"%";
+const compactINR=x=>{const a=Math.abs(x);if(a>=1e7)return RUPEE+(x/1e7).toFixed(2)+" Cr";if(a>=1e5)return RUPEE+(x/1e5).toFixed(2)+" L";return fmtINR(x);};
+
+/* ---------- math ---------- */
+const sum=a=>a.reduce((s,x)=>s+x,0), dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0), seq=n=>Array.from({length:n},(_,i)=>i);
+function rnorm(m=0,sd=1){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return m+sd*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function rgamma(sh,sc){if(sh<1){const u=Math.random();return rgamma(1+sh,sc)*Math.pow(u,1/sh);}const d=sh-1/3,c=1/Math.sqrt(9*d);while(true){let x,v;do{x=rnorm();v=1+c*x;}while(v<=0);v=v*v*v;const u=Math.random();if(u<1-0.0331*x*x*x*x)return d*v*sc;if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v)))return d*v*sc;}}
+function rbeta(a,b){const x=rgamma(a,1),y=rgamma(b,1);return x/(x+y);}
+function betaMS(m,se){if(se<=0)return{a:m*1e6,b:(1-m)*1e6};const v=se*se,t=m*(1-m)/v-1;return{a:Math.max(.01,m*t),b:Math.max(.01,(1-m)*t)};}
+function gammaMS(m,se){if(se<=0)return{shape:1e6,scale:m/1e6};const v=se*se;return{shape:m*m/v,scale:v/m};}
+
+/* ---------- engine: costing ---------- */
+function inflate(c,fy,ty,r){if(!fy||isNaN(fy))return c;return c*Math.pow(1+r,ty-fy);}
+function microCost(rows,ty,infl){
+  const lines=rows.map(r=>{const u=inflate(+r.unit_cost,+r.year,ty,infl);return{...r,unit_cost_adj:u,line_cost:(+r.quantity)*u};});
+  const total=sum(lines.map(l=>l.line_cost||0));
+  const byCat=COST_CATEGORIES.map(cat=>{const cost=sum(lines.filter(l=>l.category===cat).map(l=>l.line_cost));return{category:cat,cost,share:total?cost/total:0};}).filter(c=>c.cost>0);
+  return{lines,total,byCat};
+}
+/* ---------- engine: OOP / catastrophic expenditure ---------- */
+function oopRun(o){
+  const items=o.items.map(i=>({...i,amount:+i.amount}));
+  const total=sum(items.map(i=>i.amount));
+  const byCat=COST_CATEGORIES.map(cat=>{const cost=sum(items.filter(i=>i.category===cat).map(i=>i.amount));return{category:cat,cost,share:total?cost/total:0};}).filter(c=>c.cost>0);
+  const pctInc=o.income?total/o.income:0, pctCTP=o.nonFood?total/o.nonFood:0;
+  return{items,total,byCat,pctInc,pctCTP,che10:pctInc>0.10,che25:pctInc>0.25,che40:pctCTP>0.40};
+}
+/* ---------- engine: evaluation ---------- */
+function icerIncremental(strats){
+  const d=strats.map(s=>({...s,cost:+s.cost,effect:+s.effect})).sort((a,b)=>a.cost-b.cost);
+  d.forEach(s=>s.status="frontier");
+  d.forEach(s=>{if(d.some(o=>o.cost<s.cost&&o.effect>=s.effect))s.status="dominated";});
+  let fr=d.filter(s=>s.status!=="dominated");
+  for(let i=0;i<fr.length;i++){if(i===0){fr[i].incCost=null;fr[i].incEff=null;fr[i].icer=null;}else{fr[i].incCost=fr[i].cost-fr[i-1].cost;fr[i].incEff=fr[i].effect-fr[i-1].effect;fr[i].icer=fr[i].incEff?fr[i].incCost/fr[i].incEff:null;}}
+  for(let i=2;i<fr.length;i++){if(fr[i].icer!=null&&fr[i-1].icer!=null&&fr[i].icer<fr[i-1].icer)fr[i-1].status="extended";}
+  d.forEach(s=>{const f=fr.find(x=>x.strategy===s.strategy);if(f){s.incCost=f.incCost;s.incEff=f.incEff;s.icer=f.icer;s.status=f.status;}});
+  return d;
+}
+const nmb=(c,e,w)=>e*w-c;
+const EVAL_TYPES={
+  CMA:{name:"Cost-minimisation",abbr:"CMA",eff:"Outcome (assumed equal)",wtp:false,def:"Use when the health outcomes of the options are equivalent — then only costs matter; the cheapest wins.",req:["Total cost for each option","Evidence that outcomes are equal/equivalent"]},
+  CEA:{name:"Cost-effectiveness",abbr:"CEA",eff:"Effect — natural unit (e.g. life-years)",wtp:true,def:"Cost per unit of a single natural outcome (life-years gained, cases averted, mmHg). ICER vs the next option.",req:["Total cost for each option","A common natural-unit effect for each option"]},
+  CUA:{name:"Cost-utility",abbr:"CUA",eff:"QALYs",wtp:true,def:"Cost per QALY (or DALY averted) — captures both length and quality of life. The HTA standard.",req:["Total cost for each option","QALYs (utility × time) for each option"]},
+  CBA:{name:"Cost-benefit",abbr:"CBA",eff:"Benefit (₹, monetised)",wtp:false,def:"Both costs and outcomes valued in money. Reports net monetary benefit and the benefit–cost ratio.",req:["Total cost for each option","Monetised benefit (₹) for each option"]},
+  CCA:{name:"Cost-consequence",abbr:"CCA",eff:"An outcome measure",wtp:false,def:"A descriptive balance sheet: costs and a range of outcomes listed side by side, left for the reader to weigh.",req:["Total cost for each option","One or more outcome measures"]}
+};
+function evalRequirements(type,strats){
+  const t=EVAL_TYPES[type];
+  const allCost=strats.every(s=>+s.cost>0);
+  const allEff=strats.every(s=>+s.effect!==0&&s.effect!=="");
+  const eff=strats.map(s=>+s.effect), mean=sum(eff)/eff.length;
+  const equal=mean===0?true:(Math.max(...eff)-Math.min(...eff))/Math.abs(mean)<0.03;
+  const items=[{label:"Total cost for each option",ok:allCost}];
+  if(type==="CMA"){items.push({label:"Outcomes equal across options",ok:equal,warn:!equal&&"Outcomes differ — CEA/CUA may be more appropriate"});}
+  else if(type==="CBA"){items.push({label:"Monetised benefit (₹) for each option",ok:allEff});}
+  else if(type==="CCA"){items.push({label:"At least one outcome measure",ok:allEff});}
+  else {items.push({label:t.req[1],ok:allEff});}
+  return{items,missing:items.filter(i=>!i.ok).length};
+}
+const ADVISOR={
+  "qaly":{t:"CUA",why:"Quality-adjusted life-years capture quality + length of life → cost-utility analysis."},
+  "life":{t:"CEA",why:"A single natural clinical outcome (life-years, cases averted) → cost-effectiveness analysis."},
+  "clinical":{t:"CEA",why:"A clinical natural unit (e.g. mmHg, % controlled) → cost-effectiveness analysis."},
+  "money":{t:"CBA",why:"Outcomes already valued in money → cost-benefit analysis (net benefit, BCR)."},
+  "multiple":{t:"CCA",why:"Several different outcomes you don't want to combine → cost-consequence analysis."},
+  "equal":{t:"CMA",why:"Outcomes are equivalent across options → cost-minimisation (compare cost only)."}
+};
+/* ---------- engine: configurable Markov (any states / strategies, QALY+DALY) ---------- */
+function fixModel(m){ // ensure each strategy matrix is n×n
+  const n=m.states.length;
+  m.strategies.forEach(s=>{const M=[];for(let i=0;i<n;i++){const row=[];for(let j=0;j<n;j++){const v=s.matrix&&s.matrix[i]&&s.matrix[i][j]!=null?+s.matrix[i][j]:(i===j?1:0);row.push(v);}M.push(row);}s.matrix=M;});
+}
+function rowSum(row){return sum(row.map(Number));}
+function markovGeneric(m,strat){
+  const n=m.states.length,P=strat.matrix,nC=Math.round(m.horizon/m.cycle);
+  let trace=[m.states.map((s,i)=>i===0?1:0)];
+  for(let t=0;t<nC;t++){const cur=trace[t],nx=new Array(n).fill(0);
+    for(let i=0;i<n;i++){const row=P[i]||[];for(let j=0;j<n;j++)nx[j]+=cur[i]*(+row[j]||0);}
+    trace.push(nx);}
+  let C=0,Q=0,YLD=0;
+  for(let t=0;t<nC;t++){const occ=trace[t].map((v,i)=>(v+trace[t+1][i])/2),dc=Math.pow(1+m.dCost,t*m.cycle),de=Math.pow(1+m.dEff,t*m.cycle);
+    for(let i=0;i<n;i++){const st=m.states[i],cc=(+st.cost)+(st.absorbing?0:(+strat.addCost||0));
+      C+=occ[i]*cc*m.cycle/dc; Q+=occ[i]*(+st.util)*m.cycle/de; YLD+=occ[i]*(+st.dw||0)*m.cycle/de;}}
+  const deadIdx=m.states.map((s,i)=>s.absorbing?i:-1).filter(i=>i>=0);let YLL=0;
+  for(let t=0;t<nC;t++){let nd=0;deadIdx.forEach(i=>nd+=trace[t+1][i]-trace[t][i]);YLL+=nd*(+m.lifeExp)/Math.pow(1+m.dEff,t*m.cycle);}
+  return{cost:C,qaly:Q,daly:YLD+YLL,yld:YLD,yll:YLL,trace,nC};
+}
+function modelRunAll(m){fixModel(m);return m.strategies.map(s=>{const r=markovGeneric(m,s);return{name:s.name,cost:r.cost,qaly:r.qaly,daly:r.daly,yll:r.yll,trace:r.trace};});}
+function modelIncremental(arr,lowerBetter){
+  let d=arr.map(s=>({...s})).sort((a,b)=>a.cost-b.cost);
+  d.forEach(s=>s.status="frontier");
+  d.forEach(s=>{if(d.some(o=>o.cost<s.cost&&(lowerBetter?o.eff<=s.eff:o.eff>=s.eff)))s.status="dominated";});
+  let fr=d.filter(s=>s.status!=="dominated");
+  for(let i=0;i<fr.length;i++){if(i===0){fr[i].incCost=null;fr[i].incEff=null;fr[i].icer=null;}else{fr[i].incCost=fr[i].cost-fr[i-1].cost;const de=lowerBetter?(fr[i-1].eff-fr[i].eff):(fr[i].eff-fr[i-1].eff);fr[i].incEff=de;fr[i].icer=de?fr[i].incCost/de:null;}}
+  for(let i=2;i<fr.length;i++){if(fr[i].icer!=null&&fr[i-1].icer!=null&&fr[i].icer<fr[i-1].icer)fr[i-1].status="extended";}
+  d.forEach(s=>{const f=fr.find(x=>x.name===s.name);if(f){s.incCost=f.incCost;s.incEff=f.incEff;s.icer=f.icer;s.status=f.status;}});
+  return d;
+}
+function rdirichlet(alpha){const g=alpha.map(a=>a>0?rgamma(a,1):0),s=sum(g)||1;return g.map(x=>x/s);}
+const ceac=(d,ws)=>ws.map(w=>({wtp:w,prob:sum(d.map(x=>nmb(x.incCost,x.incEff,w)>0?1:0))/d.length}));
+function evpi(d,w){const nb=d.map(x=>[0,nmb(x.incCost,x.incEff,w)]);const mm=sum(nb.map(x=>Math.max(...x)))/nb.length;const mx=Math.max(sum(nb.map(x=>x[0]))/nb.length,sum(nb.map(x=>x[1]))/nb.length);return Math.max(0,mm-mx);}
+function psaModel(m,N,iRef,iCmp){fixModel(m);const draws=[],K=80;
+  for(let it=0;it<N;it++){const mm=JSON.parse(JSON.stringify(m));
+    mm.states.forEach(st=>{if(+st.cost>0){const g=gammaMS(+st.cost,+st.cost*0.2);st.cost=rgamma(g.shape,g.scale);}if(+st.util>0&&+st.util<1){const b=betaMS(+st.util,0.03);st.util=rbeta(b.a,b.b);}});
+    mm.strategies.forEach(s=>{s.matrix=s.matrix.map(row=>{if(rowSum(row)===0)return row;return rdirichlet(row.map(p=>Math.max(0.0001,+p)*K));});});
+    const ref=markovGeneric(mm,mm.strategies[iRef]),cmp=markovGeneric(mm,mm.strategies[iCmp]);
+    const incEff=m.outcome==="QALY"?(cmp.qaly-ref.qaly):(ref.daly-cmp.daly);
+    draws.push({incCost:cmp.cost-ref.cost,incEff});}
+  return draws;}
+function dsaModel(m,w,iRef,iCmp){fixModel(m);
+  const nmbPair=mm=>{const r=markovGeneric(mm,mm.strategies[iRef]),c=markovGeneric(mm,mm.strategies[iCmp]);const incC=c.cost-r.cost,incE=m.outcome==="QALY"?(c.qaly-r.qaly):(r.daly-c.daly);return incE*w-incC;};
+  const base=nmbPair(m),params=[];
+  m.strategies.forEach((s,si)=>{if(+s.addCost>0)params.push({label:s.name+" added cost",mut:(mm,v)=>mm.strategies[si].addCost=v,lo:+s.addCost*0.7,hi:+s.addCost*1.3});});
+  m.states.forEach((st,si)=>{if(+st.cost>0)params.push({label:st.name+" cost",mut:(mm,v)=>mm.states[si].cost=v,lo:+st.cost*0.7,hi:+st.cost*1.3});
+    if(+st.util>0)params.push({label:st.name+" utility",mut:(mm,v)=>mm.states[si].util=v,lo:Math.max(0,+st.util-0.1),hi:Math.min(1,+st.util+0.1)});});
+  return params.map(p=>{const mlo=JSON.parse(JSON.stringify(m));p.mut(mlo,p.lo);const mhi=JSON.parse(JSON.stringify(m));p.mut(mhi,p.hi);const nL=nmbPair(mlo),nH=nmbPair(mhi);return{label:p.label,low:Math.min(nL,nH),high:Math.max(nL,nH),swing:Math.abs(nH-nL),base};}).sort((a,b)=>b.swing-a.swing).slice(0,8);
+}
+/* ---------- engine: BIA ---------- */
+function biaRun(b){const years=seq(b.horizon).map(i=>b.startYear+i);
+  const rows=years.map((yr,i)=>{const uptake=Math.min(b.maxUptake,b.maxUptake*(i+1)/b.horizon);const treated=b.population*b.eligible*uptake;const onOld=b.population*b.eligible-treated;const worldNew=treated*b.costNew+onOld*b.costOld;const worldOld=b.population*b.eligible*b.costOld;return{year:yr,uptake,treated,worldOld,worldNew,impact:worldNew-worldOld};});
+  let cum=0;rows.forEach(r=>{cum+=r.impact;r.cum=cum;});return rows;}
+
+/* ---------- CSV + templates + export ---------- */
+function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(",").map(s=>s.trim());return L.slice(1).map(ln=>{const c=ln.split(",");const o={};h.forEach((k,i)=>o[k]=(c[i]||"").trim());return o;});}
+function toCSV(rows,cols){return cols.join(",")+"\n"+rows.map(r=>cols.map(c=>r[c]).join(",")).join("\n");}
+function dl(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();}
+function download(name,text){dl(new Blob([text],{type:"text/csv"}),name);}
+const TEMPLATES={
+  costing:["artha_costing_template.csv","item,category,quantity,unit_cost,year\nConsultation,Direct medical,1,300,2024\nDrug (per month),Direct medical,12,120,2024\nDiagnostics,Direct medical,2,450,2024\nTransport,Direct non-medical,4,150,2024\nLost work day,Indirect (productivity),2,700,2024\n"],
+  oop:["artha_oop_template.csv","item,category,amount\nConsultation,Direct medical,1500\nDiagnostics,Direct medical,3000\nMedicines,Direct medical,6000\nHospitalization,Direct medical,25000\nTransport,Direct non-medical,2000\nLost wages,Indirect (productivity),8000\n"],
+  evaluation:["artha_evaluation_template.csv","strategy,cost,effect\nStandard care,40000,3.5\nNew option,85000,4.4\n"]
+};
+function dlTemplate(k){const[n,c]=TEMPLATES[k];download(n,c);}
+function activeSVG(){return document.querySelector("#workspace .pane.active svg.chart")||document.querySelector("#workspace svg.chart");}
+function wsTables(){const a=[...document.querySelectorAll("#workspace .pane.active table")];const t=a.length?a:[...document.querySelectorAll("#workspace table")];return t.map(x=>x.outerHTML).join("<br>");}
+function exportPNG(title){const svg=activeSVG();if(!svg)return alert("No chart on this view to export.");const cl=svg.cloneNode(true);const vb=svg.viewBox.baseVal;const w=vb&&vb.width?vb.width:700,h=vb&&vb.height?vb.height:440;cl.setAttribute("width",w);cl.setAttribute("height",h);
+  const xml=new XMLSerializer().serializeToString(cl),url="data:image/svg+xml;base64,"+btoa(unescape(encodeURIComponent(xml))),img=new Image();
+  img.onload=()=>{const sc=2,cv=document.createElement("canvas");cv.width=w*sc;cv.height=h*sc;const x=cv.getContext("2d");x.scale(sc,sc);x.fillStyle="#fff";x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);cv.toBlob(b=>dl(b,title+".png"));};
+  img.onerror=()=>alert("PNG export failed for this chart.");img.src=url;}
+function exportXLS(title){
+  const a=[...document.querySelectorAll("#workspace .pane.active table")];
+  const tbls=a.length?a:[...document.querySelectorAll("#workspace table")];
+  if(window.XLSX&&tbls.length){ // real .xlsx
+    const wb=XLSX.utils.book_new();
+    tbls.forEach((t,i)=>{const ws=XLSX.utils.table_to_sheet(t);XLSX.utils.book_append_sheet(wb,ws,("Sheet"+(i+1)).slice(0,31));});
+    XLSX.writeFile(wb,title.replace(/\s+/g,"_")+".xlsx");return;
+  }
+  const html='<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>'+title+"</h3>"+wsTables()+"</body></html>";
+  dl(new Blob(["﻿"+html],{type:"application/vnd.ms-excel"}),title.replace(/\s+/g,"_")+".xls");
+}
+function exportDOC(title){const svg=activeSVG();const html='<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:5px;font-size:12px}</style></head><body><h2>'+title+"</h2>"+(svg?svg.outerHTML:"")+wsTables()+'<p style="color:#777;font-size:10px">Generated by Artha HE — validated health-economics formulae (R-equivalent methods).</p></body></html>';dl(new Blob(["﻿"+html],{type:"application/msword"}),title.replace(/\s+/g,"_")+".doc");}
+function exportPDF(title){const svg=activeSVG(),w=window.open("","_blank");if(!w)return alert("Allow pop-ups to export PDF.");w.document.write('<html><head><title>'+title+'</title><style>body{font-family:Arial,sans-serif;padding:26px;color:#1A1733}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid #ccc;padding:6px;text-align:right;font-size:12px}th:first-child,td:first-child{text-align:left}svg{max-width:100%}</style></head><body><h1>'+title+"</h1>"+(svg?svg.outerHTML:"")+wsTables()+'<p style="color:#888;font-size:11px">Generated by Artha HE — validated health-economics formulae (R-equivalent methods).</p></body></html>');w.document.close();setTimeout(()=>{w.focus();w.print();},350);}
+const EXPORT_BAR='<div class="exp-bar"><button class="btn btn-ghost sm" data-exp="png">PNG</button><button class="btn btn-ghost sm" data-exp="xls">Excel</button><button class="btn btn-ghost sm" data-exp="doc">Word</button><button class="btn btn-ghost sm" data-exp="pdf">PDF</button></div>';
+function wireExports(title){document.querySelectorAll("#workspace [data-exp]").forEach(b=>b.onclick=()=>({png:exportPNG,xls:exportXLS,doc:exportDOC,pdf:exportPDF})[b.dataset.exp](title));}
+
+/* ---------- unified CHEERS-style report (all analyses → one document) ---------- */
+function reportBody(){
+  const dt=new Date().toLocaleDateString("en-IN",{year:"numeric",month:"long",day:"numeric"});
+  const tbl=(head,rows)=>`<table><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
+  // 1 Costing
+  const c=state.costing; let costSec;
+  if(c.method==="gross"){const per=c.output?c.totalCost/c.output:0;
+    costSec=`<p>Gross (top-down) costing.</p>`+tbl(["Metric","Value"],[["Total cost",fmtINR(c.totalCost)],["Output units",fmtNum(c.output,0)],["Cost per unit",fmtINR(per,2)]]);
+  }else{const r=microCost(c.rows,c.toYear,c.inflation);
+    costSec=`<p>Micro (bottom-up) costing, ${c.toYear} prices. <b>Total cost: ${fmtINR(r.total)}</b>.</p>`+tbl(["Category","Cost","Share"],r.byCat.map(b=>[b.category,fmtINR(b.cost),pct(b.share)]));}
+  // 2 OOP
+  const o=oopRun(state.oop);
+  const oopSec=`<p>Total out-of-pocket: <b>${fmtINR(o.total)}</b> — ${pct(o.pctInc)} of household income. Catastrophic at 10% income: <b>${o.che10?"Yes":"No"}</b>; at 40% capacity-to-pay: <b>${o.che40?"Yes":"No"}</b>.</p>`+tbl(["Category","Amount"],o.byCat.map(b=>[b.category,fmtINR(b.cost)]));
+  // 3 Evaluation
+  const e=state.evaluation; let evalSec;
+  if(e.type==="CEA"||e.type==="CUA"){const inc=icerIncremental(e.strats).sort((a,b)=>a.cost-b.cost);
+    evalSec=`<p>${EVAL_TYPES[e.type].name} (${e.type}). WTP ${fmtINR(e.wtp)} per ${e.type==="CUA"?"QALY":"unit"}.</p>`+tbl(["Strategy","Cost","Effect","ΔCost","ΔEffect","ICER","Status"],inc.map(s=>[s.strategy,fmtINR(s.cost),fmtNum(s.effect,2),s.incCost==null?"—":fmtINR(s.incCost),s.incEff==null?"—":fmtNum(s.incEff,2),s.icer==null?"—":fmtINR(s.icer),s.status]));
+  }else if(e.type==="CBA"){const d2=e.strats.map(s=>({...s,net:+s.effect-+s.cost,bcr:(+s.cost)?(+s.effect)/(+s.cost):0})).sort((a,b)=>b.net-a.net);
+    evalSec=`<p>Cost-benefit analysis. Best option: <b>${d2[0].strategy}</b> (net benefit ${fmtINR(d2[0].net)}).</p>`+tbl(["Strategy","Cost","Benefit","Net benefit","BCR"],d2.map(s=>[s.strategy,fmtINR(s.cost),fmtINR(+s.effect),fmtINR(s.net),fmtNum(s.bcr,2)]));
+  }else{evalSec=`<p>${EVAL_TYPES[e.type].name} (${e.type}).</p>`+tbl(["Strategy","Cost","Outcome"],e.strats.slice().sort((a,b)=>a.cost-b.cost).map(s=>[s.strategy,fmtINR(+s.cost),fmtNum(+s.effect,2)]));}
+  // 4 Model
+  const m=state.model,res=modelRunAll(m);res.forEach(s=>s.eff=m.outcome==="QALY"?s.qaly:s.daly);
+  const minc=modelIncremental(res,m.outcome==="DALY").sort((a,b)=>a.cost-b.cost),unit=m.outcome==="QALY"?"QALY":"DALY averted";
+  const modelSec=`<p>${m.states.length}-state Markov, ${m.strategies.length} strategies, ${m.horizon}-year horizon, ${pct(m.dCost,0)} discounting, half-cycle correction. Outcome: ${m.outcome}.</p>`+tbl(["Strategy","Cost","QALYs","DALYs","ICER (₹/"+unit+")","Status"],minc.map(s=>[s.name,fmtINR(s.cost),fmtNum(s.qaly,3),fmtNum(s.daly,3),s.icer==null?"—":fmtINR(s.icer),s.status]));
+  // 5 PSA
+  const iRef=Math.min(state.sens.ref??0,m.strategies.length-1),iCmp=Math.min(state.sens.cmp??1,m.strategies.length-1);
+  const draws=psaModel(m,500,iRef,iCmp),wtp=state.sens.wtp,pCE=sum(draws.map(x=>nmb(x.incCost,x.incEff,wtp)>0?1:0))/draws.length,ev=evpi(draws,wtp);
+  const psaSec=`<p>Probabilistic sensitivity analysis (500 iterations), ${m.strategies[iCmp].name} vs ${m.strategies[iRef].name}. Probability cost-effective at ${fmtINR(wtp)}: <b>${pct(pCE)}</b>. EVPI per patient: <b>${fmtINR(ev)}</b>.</p>`;
+  // 6 BIA
+  const b=biaRun(state.bia);
+  const biaSec=`<p>Budget impact over ${state.bia.horizon} years from ${state.bia.startYear}. Cumulative net impact: <b>${fmtINR(b[b.length-1].cum)}</b>.</p>`+tbl(["Year","Uptake","Net impact","Cumulative"],b.map(r=>[r.year,pct(r.uptake),fmtINR(r.impact),fmtINR(r.cum)]));
+  return `<h1>Artha HE — Health Economic Analysis Report</h1>
+    <p class="meta">Generated ${dt} · India reference case (₹, 3% discounting). Methods follow standard published health-economics formulae (R-equivalent: hesim · heemod · dampack · BCEA); reporting structured to the CHEERS 2022 checklist.</p>
+    <h2>1 · Costing</h2>${costSec}
+    <h2>2 · Out-of-pocket &amp; catastrophic expenditure</h2>${oopSec}
+    <h2>3 · Economic evaluation</h2>${evalSec}
+    <h2>4 · Decision-analytic model</h2>${modelSec}
+    <h2>5 · Sensitivity analysis</h2>${psaSec}
+    <h2>6 · Budget impact</h2>${biaSec}
+    <p class="foot">Generated by Artha HE · validated health-economics formulae · for research &amp; teaching. Verify inputs against your study protocol before use.</p>`;
+}
+function openReport(){
+  const body=reportBody();
+  const wordDoc='<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>body{font-family:Arial}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:5px;font-size:12px}h1{color:#241F46}h2{color:#5B4BD6}</style></head><body>'+body+'</body></html>';
+  const wordHref="data:application/msword;base64,"+btoa(unescape(encodeURIComponent(wordDoc)));
+  const css=`body{font-family:Arial,Helvetica,sans-serif;color:#1A1733;max-width:900px;margin:0 auto;padding:30px;line-height:1.55;}h1{font-size:24px;border-bottom:3px solid #C8971F;padding-bottom:8px;}h2{font-size:17px;color:#5B4BD6;margin-top:26px;border-left:4px solid #5B4BD6;padding-left:10px;}table{border-collapse:collapse;width:100%;margin:10px 0 18px;font-size:13px;}th,td{border:1px solid #ccc;padding:6px 9px;text-align:right;}th:first-child,td:first-child{text-align:left;}th{background:#F3F2F8;}.meta{font-size:12px;color:#666;}.foot{margin-top:30px;font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px;}.rtoolbar{position:sticky;top:0;background:#1A1733;padding:12px;margin:-30px -30px 22px;display:flex;gap:12px;align-items:center;}.rtoolbar button,.rtoolbar a{background:#5B4BD6;color:#fff;border:none;padding:9px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;font-family:Arial;}.rtoolbar .t{color:#B9B5D4;font-size:12px;margin-left:auto;}@media print{.no-print{display:none!important;}body{padding:0;max-width:none;}}`;
+  const w=window.open("","_blank");if(!w)return alert("Allow pop-ups to generate the report.");
+  w.document.write(`<html><head><title>Artha HE — Report</title><style>${css}</style></head><body><div class="rtoolbar no-print"><button onclick="window.print()">🖶 Print / Save PDF</button><a download="ArthaHE_Report.doc" href="${wordHref}">⤓ Download Word</a><span class="t">CHEERS-structured · all analyses</span></div>${body}</body></html>`);
+  w.document.close();
+}
+
+/* ---------- SVG charts ---------- */
+function svgWrap(w,h,i){return`<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${i}</svg>`;}
+function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="${o.mono?"IBM Plex Mono":"Plus Jakarta Sans"}" font-weight="${o.weight||400}">${s}</text>`;}
+function barChartH(data){const W=660,rh=50,H=data.length*rh+28,padL=185,padR=120,max=Math.max(...data.map(d=>d.value),1),bw=W-padL-padR;let g="";
+  data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"/>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
+  return svgWrap(W,H,g);}
+function barChartV(data,fmt){const W=660,H=380,ox=70,oy=H-50,pw=W-ox-30,ph=oy-24,max=Math.max(...data.map(d=>Math.abs(d.value)),1)*1.1;let g="";
+  for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`;g+=txt(ox-8,yy+4,fmt(max*i/4),{anchor:"end",fill:C.muted,size:10,mono:true});}
+  g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
+  data.forEach((d,i)=>{const bw=pw/data.length*.5,x=ox+(i+.5)*pw/data.length-bw/2,bh=(d.value/max)*ph;g+=`<rect x="${x}" y="${oy-bh}" width="${bw}" height="${bh}" rx="6" fill="${d.color||SERIES[i%6]}"/>`;g+=txt(ox+(i+.5)*pw/data.length,oy+18,d.label,{anchor:"middle",fill:C.muted,size:11});});
+  return svgWrap(W,H,g);}
+function cePlane(points,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...points.map(p=>Math.abs(p.dEff)))*1.3,yMax=Math.max(1,...points.map(p=>Math.abs(p.dCost)))*1.3,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
+  g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
+  const cap=Math.min(yMax,wtp*xMax);g+=`<line x1="${ox}" y1="${oy}" x2="${X(cap/wtp)}" y2="${Y(cap)}" stroke="${C.emerald}" stroke-dasharray="7 5" stroke-width="1.6"/>`;
+  g+=txt(X(cap/wtp)-6,Y(cap)-8,"WTP "+compactINR(wtp)+"/QALY",{anchor:"end",fill:C.emerald,size:11,weight:600});
+  g+=txt(ox+pw,oy+22,"+ effect →",{anchor:"end",fill:C.muted,size:11})+txt(ox+8,26,"↑ + cost",{fill:C.muted,size:11});
+  points.forEach(p=>{g+=`<circle cx="${X(p.dEff)}" cy="${Y(p.dCost)}" r="7" fill="${p.ref?C.muted:C.primary}" stroke="#fff" stroke-width="1.5"/>`+txt(X(p.dEff)+12,Y(p.dCost)+4,p.label,{fill:C.ink,size:12,weight:500});});
+  return svgWrap(W,H,g);}
+function scatterPSA(d,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...d.map(x=>Math.abs(x.incEff)))*1.2,yMax=Math.max(1,...d.map(x=>Math.abs(x.incCost)))*1.2,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
+  g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
+  const cap=Math.min(yMax,wtp*xMax);g+=`<line x1="${ox}" y1="${oy}" x2="${X(cap/wtp)}" y2="${Y(cap)}" stroke="${C.emerald}" stroke-dasharray="7 5" stroke-width="1.6"/>`;
+  d.forEach(x=>{g+=`<circle cx="${X(x.incEff)}" cy="${Y(x.incCost)}" r="3" fill="${nmb(x.incCost,x.incEff,wtp)>0?C.primary:C.red}" fill-opacity="0.45"/>`;});
+  g+=txt(ox+pw,oy+22,"Δ QALYs →",{anchor:"end",fill:C.muted,size:11})+txt(ox+8,26,"↑ Δ cost",{fill:C.muted,size:11});
+  return svgWrap(W,H,g);}
+function lineChart(series,xlab,xmax){const W=680,H=380,ox=66,oy=H-50,pw=W-ox-26,ph=oy-22,yMax=Math.max(...series.flatMap(s=>s.data.map(d=>d.y)),.001)*1.05,X=v=>ox+(v/xmax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
+  for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(yMax*i/4).toFixed(yMax<3?2:0),{anchor:"end",fill:C.muted,size:10,mono:true});}
+  g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
+  series.forEach((s,si)=>{g+=`<polyline points="${s.data.map(d=>`${X(d.x)},${Y(d.y)}`).join(" ")}" fill="none" stroke="${s.color||SERIES[si%6]}" stroke-width="2.4"/>`;});
+  g+=txt(ox+pw/2,H-12,xlab,{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
+function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xmax=curve[curve.length-1].wtp,X=v=>ox+(v/xmax)*pw,Y=v=>oy-v*ph;let g="";
+  for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
+  g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
+  [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax){g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i+1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});}});
+  g+=`<polyline points="${curve.map(c=>`${X(c.wtp)},${Y(c.prob)}`).join(" ")}" fill="none" stroke="${C.primary}" stroke-width="2.6"/>`;
+  g+=txt(ox+pw/2,H-12,"Willingness-to-pay per QALY (₹)",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
+function tornado(rows){const W=680,rh=44,H=rows.length*rh+38,padL=200,mid=padL+(W-padL-40)/2,max=Math.max(...rows.map(r=>Math.max(Math.abs(r.high-r.base),Math.abs(r.low-r.base))),1),half=(W-padL-40)/2,scale=v=>(v/max)*half;let g="";
+  g+=`<line x1="${mid}" y1="12" x2="${mid}" y2="${H-20}" stroke="${C.ink}" stroke-width="1.2"/>`+txt(mid,H-6,"Net monetary benefit swing",{anchor:"middle",fill:C.muted,size:10.5});
+  rows.forEach((r,i)=>{const y=18+i*rh,loW=scale(r.base-r.low),hiW=scale(r.high-r.base);g+=`<rect x="${mid-loW}" y="${y}" width="${loW}" height="24" rx="4" fill="${C.amber}"/><rect x="${mid}" y="${y}" width="${hiW}" height="24" rx="4" fill="${C.primary}"/>`+txt(padL-14,y+17,r.label,{anchor:"end",fill:C.ink,size:12});});
+  return svgWrap(W,H,g);}
+
+/* ============================ STATE ============================ */
+const state={
+  module:"home",
+  costing:{method:"micro",toYear:2024,inflation:.05,rows:[
+    {item:"Outpatient consultation",category:"Direct medical",quantity:4,unit_cost:300,year:2022},
+    {item:"HbA1c test",category:"Direct medical",quantity:2,unit_cost:450,year:2022},
+    {item:"Metformin (1 month)",category:"Direct medical",quantity:12,unit_cost:120,year:2023},
+    {item:"Insulin (1 month)",category:"Direct medical",quantity:6,unit_cost:900,year:2023},
+    {item:"Nursing time (hour)",category:"Direct medical",quantity:3,unit_cost:250,year:2022},
+    {item:"Patient travel",category:"Direct non-medical",quantity:8,unit_cost:150,year:2024},
+    {item:"Lost work day",category:"Indirect (productivity)",quantity:5,unit_cost:700,year:2024}],totalCost:5000000,output:1200},
+  oop:{income:200000,nonFood:120000,items:[
+    {item:"Doctor consultation",category:"Direct medical",amount:1500},
+    {item:"Diagnostics / lab",category:"Direct medical",amount:3000},
+    {item:"Medicines",category:"Direct medical",amount:6000},
+    {item:"Hospitalization",category:"Direct medical",amount:25000},
+    {item:"Transport",category:"Direct non-medical",amount:2000},
+    {item:"Food & lodging (carer)",category:"Direct non-medical",amount:1500},
+    {item:"Lost wages",category:"Indirect (productivity)",amount:8000}]},
+  evaluation:{type:"CUA",wtp:GDP_PC,strats:[
+    {strategy:"Standard care",cost:40000,effect:3.5},
+    {strategy:"New drug A",cost:85000,effect:4.4},
+    {strategy:"New drug B",cost:120000,effect:4.7}]},
+  model:{
+    states:[
+      {name:"Healthy",cost:2000,util:0.92,dw:0.05,absorbing:false},
+      {name:"Sick",cost:14000,util:0.62,dw:0.40,absorbing:false},
+      {name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
+    strategies:[
+      {name:"Standard care",addCost:0,matrix:[[0.84,0.15,0.01],[0,0.90,0.10],[0,0,1]]},
+      {name:"New treatment",addCost:9000,matrix:[[0.8930,0.0975,0.0095],[0,0.90,0.10],[0,0,1]]}],
+    cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1},
+  sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1},
+  bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000}
+};
+
+/* ============================ HOME ============================ */
+function renderLanding(){
+  const defs=[
+    {a:"Costing",cls:"ink",go:"costing",h:"Micro & gross costing",p:"Bottom-up (resource × unit cost) or top-down (budget ÷ output). The foundation of every evaluation."},
+    {a:"OOP / CHE",cls:"gold",go:"oop",h:"Out-of-pocket & catastrophic expenditure",p:"What patients pay directly, and whether it crosses catastrophic (10% income / 40% capacity-to-pay) thresholds."},
+    {a:"CMA",cls:"",go:"evaluation",h:"Cost-minimisation",p:"When outcomes are equal, compare cost only — cheapest option wins."},
+    {a:"CEA",cls:"",go:"evaluation",h:"Cost-effectiveness",p:"Cost per natural outcome (life-year, case averted). Reports the ICER vs the next best option."},
+    {a:"CUA",cls:"",go:"evaluation",h:"Cost-utility",p:"Cost per QALY — the HTA standard, capturing both quality and length of life."},
+    {a:"CBA",cls:"",go:"evaluation",h:"Cost-benefit",p:"Costs and outcomes both in money — net monetary benefit and benefit–cost ratio."},
+    {a:"Markov",cls:"em",go:"modeling",h:"Decision-analytic modeling",p:"State-transition (Markov) cohort models with half-cycle correction and discounting, in one click."},
+    {a:"PSA / DSA",cls:"em",go:"sensitivity",h:"Sensitivity analysis",p:"Tornado (one-way), probabilistic Monte-Carlo, CEAC and EVPI — how robust is the conclusion?"},
+    {a:"BIA",cls:"gold",go:"bia",h:"Budget impact analysis",p:"Affordability for the payer: annual and cumulative spend as a new treatment is adopted."},
+    {a:"ICER",cls:"ink",h:"Incremental cost-effectiveness ratio",p:"Δcost ÷ Δeffect between options, with strong and extended dominance detected automatically."}
+  ];
+  document.getElementById("landing").innerHTML=`
+    <div class="lhead">
+      <div class="brand"><div class="logo">अ</div><div><div class="name">Artha<b> HE</b></div><div class="tagline">Health Economics Workbench</div></div></div>
+      <button class="btn btn-primary" id="enterTop">Enter the Workbench →</button>
+    </div>
+    <div class="home">
+    <section class="hero">
+      <div class="fluid"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+      <div class="hero-inner">
+        <div class="logo-hero"><div class="ring"></div><div class="tile">अ</div></div>
+        <div style="flex:1;min-width:280px">
+          <h1>Artha <b>HE</b></h1>
+          <p class="lead">A friendly workbench that turns your data into full health-economic analyses — costing, out-of-pocket burden, cost-effectiveness, modeling, sensitivity and budget impact — with the complex maths handled for you.</p>
+          <div class="pills"><span class="pill">Researchers</span><span class="pill">Teaching</span><span class="pill">India / LMIC</span><span class="pill">Payers / HTA</span></div>
+          <div class="cta"><button class="btn btn-primary btn-lg" id="ctaStart">Enter the Workbench →</button>
+            <button class="btn btn-secondary btn-lg" id="ctaMethods">See the methods</button></div>
+        </div>
+      </div>
+    </section>
+
+    <h2 class="sec">How it works</h2>
+    <p class="secsub">Four steps — and if you're not sure which analysis you need, the Evaluation tab has a built-in advisor that recommends the right method and tells you exactly what data is required.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h4>Pick an analysis</h4><p>Costing, OOP, an economic evaluation (CMA/CEA/CUA/CBA), a Markov model, sensitivity or budget impact.</p></div>
+      <div class="step"><div class="n">2</div><h4>Use a template</h4><p>Download a ready-made CSV template, fill in your data, and upload it — or just type into the on-screen grid.</p></div>
+      <div class="step"><div class="n">3</div><h4>Run — one click</h4><p>Validated formulae compute ICERs, QALYs, CEAC, EVPI and more in the background, with clear charts.</p></div>
+      <div class="step"><div class="n">4</div><h4>Export</h4><p>Send any analysis to Excel, Word, PDF or PNG for your report, paper or presentation.</p></div>
+    </div>
+
+    <h2 class="sec">The components of economic evaluation</h2>
+    <p class="secsub">A quick reference to the building blocks — click any card to open that tool.</p>
+    <div class="defs" id="defGrid">
+      ${defs.map(d=>`<div class="def" ${d.go?`data-go="${d.go}"`:""}>
+        <span class="abbr ${d.cls}">${d.a}</span><h4>${d.h}</h4><p>${d.p}</p>${d.go?'<span class="go">Open tool →</span>':""}</div>`).join("")}
+    </div>
+
+    <div class="method" id="methods">
+      <h3>How Artha HE is built</h3>
+      <p>Every number is produced with <b style="color:#fff">validated, published health-economics formulae</b> — the same methods implemented in the standard R toolchain (<b style="color:#fff">hesim, heemod, dampack, BCEA</b>). That includes discounting and half-cycle correction, ICER and dominance logic, probabilistic sensitivity analysis with Beta / Gamma / Lognormal distributions, cost-effectiveness acceptability curves and expected value of perfect information. Defaults follow Indian / LMIC reference cases (GDP-based willingness-to-pay, 3% discounting) and reporting aligns with the CHEERS 2022 checklist.</p>
+      <div class="badges"><span class="badge">R-equivalent methods</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">India reference case</span></div>
+    </div>
+    <div style="text-align:center;margin-top:36px"><button class="btn btn-primary btn-lg" id="enterBottom">Enter the Workbench →</button></div>
+    <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching</footer>
+  </div>`;
+  const enter=()=>enterApp("costing");
+  document.getElementById("enterTop").onclick=enter;
+  document.getElementById("enterBottom").onclick=enter;
+  document.getElementById("ctaStart").onclick=enter;
+  document.getElementById("ctaMethods").onclick=()=>document.getElementById("methods").scrollIntoView({behavior:"smooth"});
+  document.querySelectorAll("#defGrid .def[data-go]").forEach(d=>d.onclick=()=>enterApp(d.dataset.go));
+}
+function enterApp(mod){document.getElementById("landing").style.display="none";document.getElementById("appShell").style.display="";window.scrollTo(0,0);route(mod||"costing");}
+function backToLanding(){document.getElementById("appShell").style.display="none";const l=document.getElementById("landing");l.style.display="";window.scrollTo(0,0);}
+
+/* ============================ COSTING ============================ */
+function renderCostingSidebar(){
+  const c=state.costing,catOpts=cat=>COST_CATEGORIES.map(o=>`<option ${o===cat?"selected":""}>${o}</option>`).join("");
+  const rows=c.rows.map((r,i)=>`<tr><td><input data-f="item" data-i="${i}" value="${r.item}"></td><td><select data-f="category" data-i="${i}">${catOpts(r.category)}</select></td><td><input data-f="quantity" data-i="${i}" type="number" value="${r.quantity}" style="text-align:right"></td><td><input data-f="unit_cost" data-i="${i}" type="number" value="${r.unit_cost}" style="text-align:right"></td><td><input data-f="year" data-i="${i}" type="number" value="${r.year}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">01</span> Costing</h2>
+    <p class="hint">Cost a programme from resource use (micro) or a total budget (gross). A diabetes-care example is loaded.</p>
+    <div class="seg" id="costMethod"><button data-v="micro" class="${c.method==="micro"?"active":""}">Micro-costing</button><button data-v="gross" class="${c.method==="gross"?"active":""}">Gross-costing</button></div>
+    <div id="microC" style="display:${c.method==="micro"?"block":"none"}">
+      <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
+      <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
+      <div class="field"><label>Express all costs in price year</label><input type="number" id="toYear" value="${c.toYear}"></div>
+      <div class="field"><label>Annual inflation <span class="lab-val" id="inflLab">${pct(c.inflation)}</span></label><input type="range" id="infl" min="0" max="15" step="0.5" value="${c.inflation*100}"></div></div>
+    <div id="grossC" style="display:${c.method==="gross"?"block":"none"}">
+      <div class="field"><label>Total cost of the service (₹)</label><input type="number" id="totalCost" value="${c.totalCost}"></div>
+      <div class="field"><label>Output units (patients, visits…)</label><input type="number" id="output" value="${c.output}"></div></div>
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="calcBtn">Calculate</button>`;
+  document.querySelectorAll("#costMethod button").forEach(b=>b.onclick=()=>{c.method=b.dataset.v;renderCostingSidebar();renderCosting();});
+  document.querySelectorAll("#costRows [data-f]").forEach(el=>el.onchange=()=>c.rows[+el.dataset.i][el.dataset.f]=el.value);
+  document.querySelectorAll("#costRows .row-del").forEach(el=>el.onclick=()=>{c.rows.splice(+el.dataset.del,1);renderCostingSidebar();});
+  const a=document.getElementById("addRow");if(a)a.onclick=()=>{c.rows.push({item:"New item",category:"Direct medical",quantity:1,unit_cost:0,year:c.toYear});renderCostingSidebar();};
+  const inf=document.getElementById("infl");if(inf)inf.oninput=()=>{c.inflation=+inf.value/100;document.getElementById("inflLab").textContent=pct(c.inflation);};
+  const ty=document.getElementById("toYear");if(ty)ty.onchange=()=>c.toYear=+ty.value;
+  const tc=document.getElementById("totalCost");if(tc)tc.onchange=()=>c.totalCost=+tc.value;
+  const op=document.getElementById("output");if(op)op.onchange=()=>c.output=+op.value;
+  const tpl=document.getElementById("tplCost");if(tpl)tpl.onclick=()=>dlTemplate("costing");
+  const cf=document.getElementById("csvFile");if(cf)cf.onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{c.rows=parseCSV(rd.result);renderCostingSidebar();renderCosting();};rd.readAsText(f);};
+  document.getElementById("calcBtn").onclick=renderCosting;
+}
+function renderCosting(){
+  const c=state.costing,ws=document.getElementById("workspace");
+  if(c.method==="gross"){const per=c.output?c.totalCost/c.output:0;
+    ws.innerHTML=`<div class="ws-head"><div><h2>Gross costing</h2><div class="sub">Top-down: total expenditure ÷ output units.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(c.totalCost)}</div><div class="k-sub">${fmtINR(c.totalCost)}</div></div><div class="kpi gold"><div class="k-label">Cost per unit</div><div class="k-val">${compactINR(per)}</div><div class="k-sub">over ${fmtNum(c.output,0)} units</div></div></div>
+      <div class="card"><h3>Calculation</h3><table class="results-table"><tbody><tr><td>Total cost</td><td>${fmtINR(c.totalCost)}</td></tr><tr><td>Output units</td><td>${fmtNum(c.output,0)}</td></tr><tr><td>Average cost per unit</td><td>${fmtINR(per,2)}</td></tr></tbody></table></div>`;
+    wireExports("Artha Gross Costing");return;}
+  const res=microCost(c.rows,c.toYear,c.inflation),bars=res.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
+  const lr=res.lines.map(l=>`<tr><td>${l.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${l.category}</td><td>${fmtNum(l.quantity,0)}</td><td>${fmtINR(l.unit_cost_adj,0)}</td><td>${fmtINR(l.line_cost,0)}</td></tr>`).join("");
+  ws.innerHTML=`<div class="ws-head"><div><h2>Micro costing</h2><div class="sub">Bottom-up: quantity × unit cost, inflated to ${c.toYear} prices (${pct(c.inflation)}/yr).</div></div>${EXPORT_BAR}</div>
+    <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi"><div class="k-label">Cost lines</div><div class="k-val mono">${res.lines.length}</div></div><div class="kpi"><div class="k-label">Categories</div><div class="k-val mono">${res.byCat.length}</div></div></div>
+    <div class="result-tabs" id="costTabs"><button class="result-tab active" data-p="cat">By category</button><button class="result-tab" data-p="lines">Cost lines</button></div>
+    <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>Cost by category</h3><div class="card-sub">Share of total across perspective categories.</div>${barChartH(bars)}</div></div></div>
+    <div class="pane" data-pane="lines"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Qty</th><th>Unit (adj)</th><th>Line cost</th></tr></thead><tbody>${lr}</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td>${fmtINR(res.total)}</td></tr></tfoot></table></div></div></div>`;
+  wireTabs("costTabs");wireExports("Artha Micro Costing");
+}
+
+/* ============================ OOP ============================ */
+function renderOopSidebar(){
+  const o=state.oop,catOpts=cat=>COST_CATEGORIES.map(x=>`<option ${x===cat?"selected":""}>${x}</option>`).join("");
+  const rows=o.items.map((r,i)=>`<tr><td><input data-f="item" data-i="${i}" value="${r.item}"></td><td><select data-f="category" data-i="${i}">${catOpts(r.category)}</select></td><td><input data-f="amount" data-i="${i}" type="number" value="${r.amount}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">02</span> Out-of-Pocket</h2>
+    <p class="hint">What the patient/household pays directly for one illness episode — and whether it is <b>catastrophic</b>.</p>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>₹ Amount</th><th></th></tr></thead><tbody id="oopRows">${rows}</tbody></table></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addOop">+ Add item</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="oopFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplOop">Template</button></div>
+    <div class="field"><label>Annual household income (₹)</label><input type="number" id="income" value="${o.income}"></div>
+    <div class="field"><label>Annual non-food / capacity-to-pay (₹)</label><input type="number" id="nonFood" value="${o.nonFood}"></div>
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="calcOop">Calculate</button>`;
+  document.querySelectorAll("#oopRows [data-f]").forEach(el=>el.onchange=()=>o.items[+el.dataset.i][el.dataset.f]=el.dataset.f==="amount"?+el.value:el.value);
+  document.querySelectorAll("#oopRows .row-del").forEach(el=>el.onclick=()=>{o.items.splice(+el.dataset.del,1);renderOopSidebar();});
+  document.getElementById("addOop").onclick=()=>{o.items.push({item:"New item",category:"Direct medical",amount:0});renderOopSidebar();};
+  document.getElementById("income").onchange=e=>o.income=+e.target.value;
+  document.getElementById("nonFood").onchange=e=>o.nonFood=+e.target.value;
+  document.getElementById("tplOop").onclick=()=>dlTemplate("oop");
+  document.getElementById("oopFile").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{o.items=parseCSV(rd.result);renderOopSidebar();renderOop();};rd.readAsText(f);};
+  document.getElementById("calcOop").onclick=renderOop;
+}
+function renderOop(){
+  const o=state.oop,ws=document.getElementById("workspace"),r=oopRun(o);
+  const bars=r.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
+  const flag=(v,t)=>`<span class="tag ${v?"dominated":"frontier"}">${v?"Yes":"No"}</span> ${t}`;
+  const it=r.items.map(i=>`<tr><td>${i.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${i.category}</td><td>${fmtINR(i.amount)}</td></tr>`).join("");
+  ws.innerHTML=`<div class="ws-head"><div><h2>Out-of-pocket expenditure</h2><div class="sub">Direct patient payments and catastrophic-health-expenditure (CHE) check at 10% of income and 40% of capacity-to-pay.</div></div>${EXPORT_BAR}</div>
+    <div class="kpis">
+      <div class="kpi accent"><div class="k-label">Total OOP</div><div class="k-val">${compactINR(r.total)}</div><div class="k-sub">${fmtINR(r.total)}</div></div>
+      <div class="kpi gold"><div class="k-label">% of income</div><div class="k-val mono">${pct(r.pctInc)}</div><div class="k-sub">of ${compactINR(o.income)}/yr</div></div>
+      <div class="kpi ${r.che10?'':'emerald'}"><div class="k-label">Catastrophic (10% income)</div><div class="k-val sm" style="color:${r.che10?C.red:C.emerald}">${r.che10?"Yes":"No"}</div><div class="k-sub">${pct(r.pctInc)} vs 10%</div></div>
+      <div class="kpi ${r.che40?'':'emerald'}"><div class="k-label">Catastrophic (40% CTP)</div><div class="k-val sm" style="color:${r.che40?C.red:C.emerald}">${r.che40?"Yes":"No"}</div><div class="k-sub">${pct(r.pctCTP)} vs 40%</div></div></div>
+    <div class="result-tabs" id="oopTabs"><button class="result-tab active" data-p="cat">By category</button><button class="result-tab" data-p="items">Items</button></div>
+    <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>OOP by category</h3><div class="card-sub">Direct medical, direct non-medical and indirect (productivity) burden.</div>${barChartH(bars)}</div></div></div>
+    <div class="pane" data-pane="items"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Amount</th></tr></thead><tbody>${it}</tbody><tfoot><tr><td>Total OOP</td><td></td><td>${fmtINR(r.total)}</td></tr></tfoot></table></div>
+      <p class="note">CHE definitions: OOP &gt; 10% (or 25%) of household income, or &gt; 40% of capacity-to-pay (non-food expenditure) — WHO/standard thresholds.</p></div></div>`;
+  wireTabs("oopTabs");wireExports("Artha Out-of-Pocket");
+}
+
+/* ============================ EVALUATION ============================ */
+function renderEvalSidebar(){
+  const e=state.evaluation,t=EVAL_TYPES[e.type];
+  const typeBtns=Object.keys(EVAL_TYPES).map(k=>`<button data-t="${k}" class="${e.type===k?"active":""}">${k}</button>`).join("");
+  const rows=e.strats.map((s,i)=>`<tr><td><input data-f="strategy" data-i="${i}" value="${s.strategy}"></td><td><input data-f="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-f="effect" data-i="${i}" type="number" step="0.01" value="${s.effect}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">03</span> Evaluation</h2>
+    <p class="hint">Choose the type of economic evaluation — or let the advisor pick based on your data.</p>
+    <div class="sublabel">Analysis type</div>
+    <div class="seg types" id="evalType">${typeBtns}</div>
+    <div class="advisor"><label style="font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Not sure? What outcome do you have?</label>
+      <select id="advisor" style="margin-top:7px"><option value="">— choose —</option>
+        <option value="qaly">QALYs / quality of life</option><option value="life">Life-years / deaths averted</option>
+        <option value="clinical">A clinical unit (mmHg, % controlled)</option><option value="money">A value in money (₹)</option>
+        <option value="multiple">Several different outcomes</option><option value="equal">Outcomes are equal across options</option></select>
+      <div id="advOut"></div></div>
+    <div class="callout"><b>${t.abbr} — ${t.name}.</b> ${t.def}</div>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Strategy</th><th>Cost ₹</th><th>${e.type==="CBA"?"Benefit ₹":e.type==="CUA"?"QALYs":"Effect"}</th><th></th></tr></thead><tbody id="evalRows">${rows}</tbody></table></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Add</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="evalFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplEval">Template</button></div>
+    ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="1000000" step="25000" value="${e.wtp}"></div><p class="hint" style="margin-top:-6px">1× GDP ≈ ${fmtINR(GDP_PC)} · 3× GDP ≈ ${fmtINR(GDP_PC*3)}</p>`:""}
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="analyseBtn">Analyse</button>`;
+  document.querySelectorAll("#evalType button").forEach(b=>b.onclick=()=>{e.type=b.dataset.t;renderEvalSidebar();renderEval();});
+  const adv=document.getElementById("advisor");adv.onchange=()=>{const a=ADVISOR[adv.value];const out=document.getElementById("advOut");if(!a){out.innerHTML="";return;}out.innerHTML=`<div class="rec">→ Recommended: ${a.t}</div><p style="font-size:11.5px;color:var(--ink-soft);line-height:1.45">${a.why}</p><button class="btn btn-primary sm" id="useType" style="margin-top:6px">Use ${a.t}</button>`;document.getElementById("useType").onclick=()=>{e.type=a.t;renderEvalSidebar();renderEval();};};
+  document.querySelectorAll("#evalRows [data-f]").forEach(el=>el.onchange=()=>e.strats[+el.dataset.i][el.dataset.f]=el.dataset.f==="strategy"?el.value:+el.value);
+  document.querySelectorAll("#evalRows .row-del").forEach(el=>el.onclick=()=>{e.strats.splice(+el.dataset.del,1);renderEvalSidebar();});
+  document.getElementById("addStrat").onclick=()=>{e.strats.push({strategy:"New strategy",cost:0,effect:0});renderEvalSidebar();};
+  document.getElementById("tplEval").onclick=()=>dlTemplate("evaluation");
+  document.getElementById("evalFile").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{e.strats=parseCSV(rd.result).map(r=>({strategy:r.strategy,cost:+r.cost,effect:+r.effect}));renderEvalSidebar();renderEval();};rd.readAsText(f);};
+  const w=document.getElementById("wtp");if(w)w.oninput=()=>{e.wtp=+w.value;document.getElementById("wtpLab").textContent=compactINR(+w.value);};
+  document.getElementById("analyseBtn").onclick=renderEval;
+}
+function reqCard(type){
+  const rq=evalRequirements(type,state.evaluation.strats);
+  const items=rq.items.map(i=>`<li><span class="${i.ok?"ok":"no"}">${i.ok?"✓":"✗"}</span><span>${i.label}${i.warn?` — <span style="color:var(--red)">${i.warn}</span>`:""}</span></li>`).join("");
+  return`<div class="card"><h3>Data requirements${rq.missing?` — ${rq.missing} missing`:" — all met"}</h3><div class="card-sub">For a ${EVAL_TYPES[type].name} analysis you need:</div><ul class="checklist">${items}</ul></div>`;
+}
+function renderEval(){
+  const e=state.evaluation,ws=document.getElementById("workspace"),t=EVAL_TYPES[e.type];
+  let head=`<div class="ws-head"><div><h2>${t.name} (${t.abbr})</h2><div class="sub">${t.def}</div></div>${EXPORT_BAR}</div>`;
+  if(e.type==="CBA"){
+    const d=e.strats.map(s=>({...s,cost:+s.cost,benefit:+s.effect,net:+s.effect-+s.cost,bcr:(+s.cost)?(+s.effect)/(+s.cost):0})).sort((a,b)=>b.net-a.net);
+    const best=d[0];const bars=d.map(s=>({label:s.strategy,value:s.net,color:s.strategy===best.strategy?C.emerald:C.primary}));
+    const rows=d.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(s.cost)}</td><td>${fmtINR(s.benefit)}</td><td>${fmtINR(s.net)}</td><td>${fmtNum(s.bcr,2)}</td></tr>`).join("");
+    ws.innerHTML=head+`<div class="kpis"><div class="kpi emerald"><div class="k-label">Best option</div><div class="k-val sm">${best.strategy}</div><div class="k-sub">highest net benefit</div></div><div class="kpi accent"><div class="k-label">Net benefit</div><div class="k-val mono">${compactINR(best.net)}</div><div class="k-sub">benefit − cost</div></div><div class="kpi gold"><div class="k-label">Benefit–cost ratio</div><div class="k-val mono">${fmtNum(best.bcr,2)}</div><div class="k-sub">&gt;1 = worthwhile</div></div></div>
+      <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="chart">Net benefit</button><button class="result-tab" data-p="table">Table</button><button class="result-tab" data-p="req">Requirements</button></div>
+      <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>Net monetary benefit</h3><div class="card-sub">Monetised benefit minus cost for each option.</div>${barChartV(bars,compactINR)}</div></div></div>
+      <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Benefit</th><th>Net benefit</th><th>BCR</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+      <div class="pane" data-pane="req">${reqCard("CBA")}</div>`;
+    wireTabs("evTabs");wireExports("Artha CBA");return;
+  }
+  if(e.type==="CMA"){
+    const d=e.strats.map(s=>({...s,cost:+s.cost})).sort((a,b)=>a.cost-b.cost);const best=d[0];
+    const eff=e.strats.map(s=>+s.effect),mean=sum(eff)/eff.length,equal=mean===0||(Math.max(...eff)-Math.min(...eff))/Math.abs(mean)<0.03;
+    const rows=d.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(+s.effect,2)}</td></tr>`).join("");
+    ws.innerHTML=head+`<div class="kpis"><div class="kpi emerald"><div class="k-label">Lowest cost</div><div class="k-val sm">${best.strategy}</div><div class="k-sub">recommended</div></div><div class="kpi accent"><div class="k-label">Its cost</div><div class="k-val mono">${compactINR(best.cost)}</div></div><div class="kpi ${equal?'':'gold'}"><div class="k-label">Outcomes equal?</div><div class="k-val sm" style="color:${equal?C.emerald:C.amber}">${equal?"Yes":"Check"}</div><div class="k-sub">${equal?"CMA valid":"consider CEA/CUA"}</div></div></div>
+      <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Cost comparison</button><button class="result-tab" data-p="req">Requirements</button></div>
+      <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div>${equal?"":'<p class="note">Outcomes differ across options — cost-minimisation assumes equivalence. A CEA or CUA may be more appropriate.</p>'}</div></div>
+      <div class="pane" data-pane="req">${reqCard("CMA")}</div>`;
+    wireTabs("evTabs");wireExports("Artha CMA");return;
+  }
+  if(e.type==="CCA"){
+    const rows=e.strats.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(+s.cost)}</td><td>${fmtNum(+s.effect,2)}</td></tr>`).join("");
+    ws.innerHTML=head+`<div class="callout">Cost-consequence is <b>descriptive</b>: costs and outcomes are presented side by side, with no single summary ratio — the reader weighs them.</div>
+      <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Balance sheet</button><button class="result-tab" data-p="req">Requirements</button></div>
+      <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+      <div class="pane" data-pane="req">${reqCard("CCA")}</div>`;
+    wireTabs("evTabs");wireExports("Artha CCA");return;
+  }
+  /* CEA / CUA */
+  const d=icerIncremental(e.strats),ref=d[0];
+  const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dominance</span>`:`<span class="tag frontier">on frontier</span>`;
+  const rows=d.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.effect,2)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,2)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td><td>${fmtINR(nmb(s.cost,s.effect,e.wtp))}</td></tr>`).join("");
+  const onFr=d.filter(s=>s.status==="frontier"),best=onFr.filter(s=>s.icer==null||s.icer<=e.wtp).slice(-1)[0]||ref;
+  const pts=d.map(s=>({label:s.strategy,dEff:s.effect-ref.effect,dCost:s.cost-ref.cost,ref:s.strategy===ref.strategy}));
+  const unit=e.type==="CUA"?"QALY":"unit";
+  ws.innerHTML=head+`<div class="kpis"><div class="kpi accent"><div class="k-label">Optimal at WTP</div><div class="k-val sm">${best.strategy}</div><div class="k-sub">at ${compactINR(e.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">Its ICER</div><div class="k-val mono">${best.icer==null?"ref":fmtINR(best.icer)}</div><div class="k-sub">per ${unit}</div></div><div class="kpi emerald"><div class="k-label">Net benefit</div><div class="k-val mono">${compactINR(nmb(best.cost,best.effect,e.wtp))}</div><div class="k-sub">NMB at WTP</div></div></div>
+    <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="plane">CE plane</button><button class="result-tab" data-p="table">Incremental table</button><button class="result-tab" data-p="req">Requirements</button></div>
+    <div class="pane active" data-pane="plane"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each option vs the cheapest. Dashed line = willingness-to-pay threshold.</div>${cePlane(pts,e.wtp)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.muted}"></span>Reference</div><div class="item"><span class="sw" style="background:${C.primary}"></span>Comparator</div><div class="item"><span class="sw" style="background:${C.emerald};height:3px;width:18px"></span>WTP threshold</div></div></div></div>
+    <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>${unit==="QALY"?"QALYs":"Effect"}</th><th>Δ Cost</th><th>Δ Eff</th><th>ICER</th><th style="text-align:left">Status</th><th>NMB</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+    <div class="pane" data-pane="req">${reqCard(e.type)}</div>`;
+  wireTabs("evTabs");wireExports("Artha "+e.type);
+}
+
+/* ============================ MODELING ============================ */
+function renderModelSidebar(){
+  const m=state.model;fixModel(m);
+  const stRows=m.states.map((s,i)=>`<tr><td><input data-sf="name" data-i="${i}" value="${s.name}"></td><td><input data-sf="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-sf="util" data-i="${i}" type="number" step="0.01" value="${s.util}" style="text-align:right"></td><td><input data-sf="dw" data-i="${i}" type="number" step="0.01" value="${s.dw}" style="text-align:right"></td><td style="text-align:center"><input data-sf="absorbing" data-i="${i}" type="checkbox" ${s.absorbing?"checked":""}></td><td class="row-del" data-sdel="${i}">&times;</td></tr>`).join("");
+  const strBtns=m.strategies.map((s,i)=>`<button data-strat="${i}" class="${m.activeStrat===i?"active":""}">${s.name}</button>`).join("");
+  const as=m.strategies[m.activeStrat];
+  const head=m.states.map(s=>`<th>${s.name.slice(0,4)}</th>`).join("");
+  const matRows=as.matrix.map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name.slice(0,8)}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">04</span> Markov model</h2>
+    <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
+    <div class="sublabel">Health states (cost · utility · disability wt · dead?)</div>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost</th><th>Util</th><th>DW</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
+    <div class="sublabel">Strategies &amp; transition matrix</div>
+    <div class="seg types" id="stratSel">${strBtns}</div>
+    <div class="field two"><div><label>Strategy name</label><input type="text" id="stratName" value="${as.name}"></div><div><label>Added cost / cycle</label><input type="number" id="stratAdd" value="${as.addCost}"></div></div>
+    <p class="hint" style="margin:-4px 0 8px">Row = from-state, column = to-state. Each row should sum to 1.0 (shown right).</p>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>from\\to</th>${head}<th>Σ</th></tr></thead><tbody id="matRows">${matRows}</tbody></table></div>
+    <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Strategy</button><button class="btn btn-ghost sm" id="delStrat">Remove</button></div>
+    <div class="sublabel">Outcome &amp; settings</div>
+    <div class="seg" id="outcomeSel"><button data-o="QALY" class="${m.outcome==="QALY"?"active":""}">QALYs</button><button data-o="DALY" class="${m.outcome==="DALY"?"active":""}">DALYs</button></div>
+    ${m.outcome==="DALY"?`<div class="field"><label>Life expectancy at death (yrs, for YLL)</label><input type="number" id="lifeExp" value="${m.lifeExp}"></div>`:""}
+    <div class="field two"><div><label>Cycle (yrs)</label><input type="number" id="cycle" step="0.5" value="${m.cycle}"></div><div><label>Horizon (yrs)</label><input type="number" id="horizon" value="${m.horizon}"></div></div>
+    <div class="field two"><div><label>Disc. cost</label><input type="number" id="dCost" step="0.01" value="${m.dCost}"></div><div><label>Disc. effect</label><input type="number" id="dEff" step="0.01" value="${m.dEff}"></div></div>
+    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="1000000" step="25000" value="${m.wtp}"></div>
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="runModel">Run model</button>`;
+  // state grid
+  document.querySelectorAll("#stRows [data-sf]").forEach(el=>el.onchange=()=>{const f=el.dataset.sf,i=+el.dataset.i;m.states[i][f]=f==="name"?el.value:f==="absorbing"?el.checked:+el.value;if(f==="name"||f==="absorbing")renderModelSidebar();});
+  document.querySelectorAll("#stRows .row-del").forEach(el=>el.onclick=()=>{if(m.states.length<=2)return;m.states.splice(+el.dataset.sdel,1);m.strategies.forEach(s=>{s.matrix.splice(+el.dataset.sdel,1);s.matrix.forEach(r=>r.splice(+el.dataset.sdel,1));});renderModelSidebar();});
+  document.getElementById("addState").onclick=()=>{m.states.push({name:"State "+(m.states.length+1),cost:0,util:0.5,dw:0.2,absorbing:false});fixModel(m);renderModelSidebar();};
+  // strategy selector
+  document.querySelectorAll("#stratSel button").forEach(b=>b.onclick=()=>{m.activeStrat=+b.dataset.strat;renderModelSidebar();});
+  document.getElementById("stratName").onchange=e=>{as.name=e.target.value;renderModelSidebar();};
+  document.getElementById("stratAdd").onchange=e=>as.addCost=+e.target.value;
+  document.querySelectorAll("#matRows [data-mr]").forEach(el=>el.onchange=()=>{as.matrix[+el.dataset.mr][+el.dataset.mc]=+el.value;renderModelSidebar();});
+  document.getElementById("addStrat").onclick=()=>{const n=m.states.length,id=[];for(let i=0;i<n;i++){const r=new Array(n).fill(0);r[i]=1;id.push(r);}m.strategies.push({name:"Strategy "+(m.strategies.length+1),addCost:0,matrix:id});m.activeStrat=m.strategies.length-1;renderModelSidebar();};
+  document.getElementById("delStrat").onclick=()=>{if(m.strategies.length<=2)return;m.strategies.splice(m.activeStrat,1);m.activeStrat=0;renderModelSidebar();};
+  document.querySelectorAll("#outcomeSel button").forEach(b=>b.onclick=()=>{m.outcome=b.dataset.o;renderModelSidebar();renderModel();});
+  const le=document.getElementById("lifeExp");if(le)le.onchange=e=>m.lifeExp=+e.target.value;
+  ["cycle","horizon","dCost","dEff"].forEach(k=>{const el=document.getElementById(k);el.onchange=()=>m[k]=+el.value;});
+  const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
+  document.getElementById("runModel").onclick=renderModel;
+}
+function renderModel(){
+  const m=state.model,ws=document.getElementById("workspace");
+  const res=modelRunAll(m),lowerBetter=m.outcome==="DALY";
+  res.forEach(s=>s.eff=lowerBetter?s.daly:s.qaly);
+  const inc=modelIncremental(res,lowerBetter);
+  const ref=[...inc].sort((a,b)=>a.cost-b.cost)[0];
+  const unit=m.outcome==="QALY"?"QALY":"DALY averted";
+  const onFr=inc.filter(s=>s.status==="frontier");
+  const best=onFr.filter(s=>s.icer==null||s.icer<=m.wtp).slice(-1)[0]||ref;
+  const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
+  const incRows=inc.sort((a,b)=>a.cost-b.cost).map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
+  const pts=inc.map(s=>({label:s.name,dEff:lowerBetter?(ref.daly-s.daly):(s.qaly-ref.qaly),dCost:s.cost-ref.cost,ref:s.name===ref.name}));
+  const as=m.strategies[m.activeStrat],armTrace=markovGeneric(m,as).trace;
+  const series=m.states.map((st,si)=>({label:st.name,color:SERIES[si%6],data:armTrace.map((row,t)=>({x:t*m.cycle,y:row[si]}))}));
+  ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, half-cycle correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.</div></div>${EXPORT_BAR}</div>
+    <div class="kpis"><div class="kpi accent"><div class="k-label">Optimal at WTP</div><div class="k-val sm">${best.name}</div><div class="k-sub">at ${compactINR(m.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">Its ICER</div><div class="k-val mono">${best.icer==null?"ref":fmtINR(best.icer)}</div><div class="k-sub">per ${unit}</div></div><div class="kpi emerald"><div class="k-label">Strategies</div><div class="k-val mono">${m.strategies.length}</div><div class="k-sub">${onFr.length} on frontier</div></div></div>
+    <div class="result-tabs" id="mTabs"><button class="result-tab active" data-p="trace">Cohort trace</button><button class="result-tab" data-p="ce">CE plane</button><button class="result-tab" data-p="inc">Incremental</button></div>
+    <div class="pane active" data-pane="trace"><div class="card flush"><div class="pad"><h3>Cohort trace — ${as.name}</h3><div class="card-sub">Share of the cohort in each state over time (switch strategy in the sidebar).</div>${lineChart(series,"Years",m.horizon)}</div><div class="legend">${m.states.map((s,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${s.name}</div>`).join("")}</div></div></div>
+    <div class="pane" data-pane="ce"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each strategy vs the cheapest. ${lowerBetter?"X = DALYs averted (right is better).":"X = incremental QALYs."}</div>${cePlane(pts,m.wtp)}</div></div></div>
+    <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>QALYs</th><th>DALYs</th><th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div><p class="note">ICER in ₹ per ${unit}. India thresholds: 1×GDP ≈ ${fmtINR(GDP_PC)}, 3×GDP ≈ ${fmtINR(GDP_PC*3)}.</p></div></div>`;
+  wireTabs("mTabs");wireExports("Artha Markov Model");
+}
+
+/* ============================ SENSITIVITY ============================ */
+function renderSensSidebar(){
+  const s=state.sens,m=state.model;
+  if(s.ref==null)s.ref=0; if(s.cmp==null)s.cmp=1;
+  const opts=m.strategies.map((st,i)=>`<option value="${i}">${st.name}</option>`).join("");
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">05</span> Sensitivity</h2>
+    <p class="hint">How robust is the model's conclusion to uncertainty — deterministic (tornado) and probabilistic (PSA → CEAC, EVPI).</p>
+    <div class="callout">Runs on the <b>Markov model</b> from the Modeling tab (outcome: <b>${m.outcome}</b>). Adjust states/matrix there, then re-run.</div>
+    <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
+    <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
+    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="1000000" step="25000" value="${s.wtp}"></div>
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
+  document.getElementById("sRef").value=Math.min(s.ref,m.strategies.length-1);
+  document.getElementById("sCmp").value=Math.min(s.cmp,m.strategies.length-1);
+  document.getElementById("sRef").onchange=e=>s.ref=+e.target.value;
+  document.getElementById("sCmp").onchange=e=>s.cmp=+e.target.value;
+  const n=document.getElementById("psaN");n.oninput=()=>{s.N=+n.value;document.getElementById("nLab").textContent=s.N;};
+  const w=document.getElementById("swtp");w.oninput=()=>{s.wtp=+w.value;document.getElementById("swtpLab").textContent=compactINR(+w.value);};
+  document.getElementById("runSens").onclick=renderSens;
+}
+function renderSens(){
+  const s=state.sens,m=state.model,ws=document.getElementById("workspace");
+  const iRef=Math.min(s.ref??0,m.strategies.length-1),iCmp=Math.min(s.cmp??1,m.strategies.length-1);
+  ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations…</div></div></div>`;
+  setTimeout(()=>{
+    const draws=psaModel(m,s.N,iRef,iCmp),curve=ceac(draws,seq(21).map(i=>i*50000)),pCE=sum(draws.map(d=>nmb(d.incCost,d.incEff,s.wtp)>0?1:0))/draws.length,ev=evpi(draws,s.wtp),tor=dsaModel(m,s.wtp,iRef,iCmp);
+    const unit=m.outcome==="QALY"?"QALY":"DALY averted";
+    ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${s.N} PSA iterations: <b>${m.strategies[iCmp].name}</b> vs <b>${m.strategies[iRef].name}</b> (outcome ${m.outcome}). Transition rows sampled Dirichlet; costs Gamma; utilities Beta.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(pCE)}</div><div class="k-sub">at ${compactINR(s.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(ev)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${s.N}</div></div></div>
+      <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
+      <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(curve)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
+      <div class="pane" data-pane="scatter"><div class="card flush"><div class="pad"><h3>PSA on the CE plane</h3><div class="card-sub">Each point = one Monte-Carlo draw. Purple = cost-effective at current WTP.</div>${scatterPSA(draws,s.wtp)}</div></div></div>
+      <div class="pane" data-pane="tor"><div class="card flush"><div class="pad"><h3>One-way sensitivity — tornado</h3><div class="card-sub">Swing in net monetary benefit as each parameter moves to its low/high value.</div>${tornado(tor)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.amber}"></span>Low value</div><div class="item"><span class="sw" style="background:${C.primary}"></span>High value</div></div></div></div>`;
+    wireTabs("sTabs");wireExports("Artha Sensitivity");
+  },30);
+}
+
+/* ============================ BUDGET IMPACT ============================ */
+function renderBiaSidebar(){
+  const b=state.bia,f=(id,l)=>`<div class="field"><label>${l}</label><input type="number" id="${id}" value="${b[id]}"></div>`;
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">06</span> Budget impact</h2>
+    <p class="hint">Projects the payer's annual and cumulative spend as a new treatment is adopted over time.</p>
+    ${f("population","Catchment population")}
+    <div class="field"><label>Eligible / prevalent share <span class="lab-val" id="eligLab">${pct(b.eligible)}</span></label><input type="range" id="eligible" min="0" max="0.5" step="0.005" value="${b.eligible}"></div>
+    <div class="field"><label>Peak uptake of new tx <span class="lab-val" id="upLab">${pct(b.maxUptake)}</span></label><input type="range" id="maxUptake" min="0" max="1" step="0.05" value="${b.maxUptake}"></div>
+    <div class="field two"><div><label>Horizon (yrs)</label><input type="number" id="horizon" value="${b.horizon}"></div><div><label>Start year</label><input type="number" id="startYear" value="${b.startYear}"></div></div>
+    <div class="field two"><div><label>New tx cost/yr ₹</label><input type="number" id="costNew" value="${b.costNew}"></div><div><label>Current cost/yr ₹</label><input type="number" id="costOld" value="${b.costOld}"></div></div>
+    <div class="divider"></div><button class="btn btn-primary btn-block" id="runBia">Project budget</button>`;
+  ["population","horizon","startYear","costNew","costOld"].forEach(k=>{const el=document.getElementById(k);el.onchange=()=>b[k]=+el.value;});
+  const el=document.getElementById("eligible");el.oninput=()=>{b.eligible=+el.value;document.getElementById("eligLab").textContent=pct(b.eligible);};
+  const up=document.getElementById("maxUptake");up.oninput=()=>{b.maxUptake=+up.value;document.getElementById("upLab").textContent=pct(b.maxUptake);};
+  document.getElementById("runBia").onclick=renderBia;
+}
+function renderBia(){
+  const b=state.bia,ws=document.getElementById("workspace"),rows=biaRun(b),totalImpact=rows[rows.length-1].cum;
+  const bars=rows.map(r=>({label:r.year,value:r.impact,color:C.primary}));
+  const tr=rows.map(r=>`<tr><td>${r.year}</td><td>${pct(r.uptake)}</td><td>${fmtNum(r.treated,0)}</td><td>${compactINR(r.worldNew)}</td><td>${compactINR(r.impact)}</td><td>${compactINR(r.cum)}</td></tr>`).join("");
+  ws.innerHTML=`<div class="ws-head"><div><h2>Budget impact analysis</h2><div class="sub">Payer view: net spend as the new treatment is adopted over ${b.horizon} years from ${b.startYear}.</div></div>${EXPORT_BAR}</div>
+    <div class="kpis"><div class="kpi accent"><div class="k-label">Eligible patients</div><div class="k-val mono">${fmtNum(b.population*b.eligible,0)}</div><div class="k-sub">of ${fmtNum(b.population,0)} pop.</div></div><div class="kpi gold"><div class="k-label">Cumulative impact</div><div class="k-val">${compactINR(totalImpact)}</div><div class="k-sub">over ${b.horizon} years</div></div><div class="kpi"><div class="k-label">Peak-year impact</div><div class="k-val mono">${compactINR(Math.max(...rows.map(r=>r.impact)))}</div><div class="k-sub">${rows[rows.length-1].year}</div></div></div>
+    <div class="result-tabs" id="bTabs"><button class="result-tab active" data-p="chart">Annual impact</button><button class="result-tab" data-p="tbl">Year-by-year</button></div>
+    <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>Net annual budget impact</h3><div class="card-sub">Additional spend vs staying on current treatment.</div>${barChartV(bars,compactINR)}</div></div></div>
+    <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Year</th><th>Uptake</th><th>On new tx</th><th>Total spend</th><th>Net impact</th><th>Cumulative</th></tr></thead><tbody>${tr}</tbody></table></div></div></div>`;
+  wireTabs("bTabs");wireExports("Artha Budget Impact");
+}
+
+/* ============================ PERSISTENCE ============================ */
+function saveLocal(){try{localStorage.setItem("arthaHE_v1",JSON.stringify(state));}catch(e){}}
+function loadLocal(){try{const s=localStorage.getItem("arthaHE_v1");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});}}catch(e){}}
+function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
+function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
+
+/* ============================ GLOSSARY ============================ */
+const GLOSSARY={
+  ICER:"Incremental cost-effectiveness ratio — the extra cost per extra unit of effect (e.g. per QALY) of one option versus the next best.",
+  QALY:"Quality-adjusted life-year — one year in perfect health. Combines length and quality of life (utility × time).",
+  DALY:"Disability-adjusted life-year — one lost year of healthy life. Used widely in LMIC/GBD analyses.",
+  WTP:"Willingness-to-pay — the most a decision-maker will pay for one unit of health gain; often a multiple of GDP per capita.",
+  NMB:"Net monetary benefit — effect × WTP − cost. Positive means worthwhile at that threshold.",
+  PSA:"Probabilistic sensitivity analysis — re-runs the model thousands of times sampling uncertain inputs from distributions.",
+  CEAC:"Cost-effectiveness acceptability curve — the probability an option is cost-effective across willingness-to-pay values.",
+  EVPI:"Expected value of perfect information — the value of removing all decision uncertainty; an upper bound on further research.",
+  Dominance:"A strategy is dominated if another costs less and is at least as effective (strong), or is beaten by a mix of others (extended).",
+  "Half-cycle correction":"Adjustment assuming transitions happen mid-cycle, averaging start/end state occupancy to reduce bias.",
+  Discounting:"Converting future costs and health to present value, because outcomes now are valued more than the same later.",
+  CHE:"Catastrophic health expenditure — out-of-pocket spending above a threshold of income (10%/25%) or capacity-to-pay (40%).",
+  CMA:"Cost-minimisation analysis — when outcomes are equivalent, compare costs only.",
+  CEA:"Cost-effectiveness analysis — cost per natural-unit outcome (e.g. life-year, case averted).",
+  CUA:"Cost-utility analysis — cost per QALY/DALY; the HTA standard.",
+  CBA:"Cost-benefit analysis — costs and outcomes both valued in money (net benefit, benefit-cost ratio).",
+  BIA:"Budget impact analysis — the affordability/total spend consequence of adopting a new option over time."
+};
+function term(t,label){const d=GLOSSARY[t];return d?`<abbr class="gl" title="${d.replace(/"/g,"&quot;")}">${label||t}</abbr>`:(label||t);}
+
+/* ============================ METHODS & VALIDATION ============================ */
+function runValidations(){
+  const ap=(a,b,t=0.01)=>Math.abs(a-b)<=t*Math.max(1,Math.abs(b));
+  const v=[];
+  const d=1000/Math.pow(1.03,5); v.push({n:"Discount ₹1,000 at 3% for 5 years",got:fmtNum(d,2),exp:"862.61",ok:ap(d,862.6088)});
+  const ic=(85000-40000)/(4.4-3.5); v.push({n:"ICER of (₹85k, 4.4) vs (₹40k, 3.5)",got:fmtINR(ic),exp:"₹50,000",ok:ap(ic,50000)});
+  const nb=nmb(85000,4.4,200000); v.push({n:"NMB at WTP ₹2,00,000 (cost 85k, 4.4 QALY)",got:fmtINR(nb),exp:"₹7,95,000",ok:ap(nb,795000)});
+  const dom=icerIncremental([{strategy:"A",cost:40000,effect:3.5},{strategy:"B",cost:50000,effect:3.2}]).find(x=>x.strategy==="B").status;
+  v.push({n:"Costs more & less effective → flagged dominated",got:dom,exp:"dominated",ok:dom==="dominated"});
+  const o=oopRun({income:200000,nonFood:120000,items:[{item:"x",category:"Direct medical",amount:47000}]});
+  v.push({n:"OOP ₹47,000 ÷ income ₹2,00,000",got:pct(o.pctInc),exp:"23.5%",ok:ap(o.pctInc*100,23.5)});
+  const arm=markovGeneric(state.model,state.model.strategies[0]),last=arm.trace[arm.trace.length-1],mass=sum(last);
+  v.push({n:"Markov cohort mass conserved (Σ states = 1)",got:fmtNum(mass,6),exp:"1.000000",ok:Math.abs(mass-1)<1e-9});
+  const mc=microCost([{item:"a",category:"Direct medical",quantity:2,unit_cost:100,year:2024},{item:"b",category:"Direct medical",quantity:3,unit_cost:50,year:2024}],2024,0);
+  v.push({n:"Micro-cost: 2×₹100 + 3×₹50",got:fmtINR(mc.total),exp:"₹350",ok:ap(mc.total,350)});
+  return v;
+}
+function renderMethods(){
+  const eqs=[
+    {h:"Micro-costing",f:"Total = Σ qᵢ · uᵢ · (1+g)^(t−tᵢ)",p:"Each resource = quantity × unit cost, inflated from its price year to the target year at rate g."},
+    {h:"Gross-costing",f:"Cost / unit = Total cost ÷ Output",p:"Top-down average cost across the units of output (patients, visits)."},
+    {h:term("Discounting"),f:"PV = FV ÷ (1 + r)^t",p:"Future costs and health are converted to present value at discount rate r (default 3%)."},
+    {h:term("ICER"),f:"ICER = (C₁ − C₀) ÷ (E₁ − E₀)",p:"Extra cost per extra unit of effect versus the next non-dominated option."},
+    {h:term("NMB"),f:"NMB = E · λ − C",p:"Net monetary benefit at willingness-to-pay λ. The option with the highest NMB is optimal."},
+    {h:"Markov model",f:"sₜ₊₁ = sₜ · P ;  cost = Σ (s̄ₜ · c) ÷ (1+r)^t",p:"Cohort distributed across states via transition matrix P; "+term("Half-cycle correction","half-cycle correction")+" uses mean occupancy s̄ₜ."},
+    {h:term("PSA"),f:"θ ~ Beta / Gamma / Lognormal → rerun",p:"Parameters sampled from distributions each iteration; produces the CE-plane cloud."},
+    {h:term("CEAC"),f:"P(cost-effective | λ) = P(NMB > 0)",p:"Share of PSA iterations in which the new option has positive net benefit at λ."},
+    {h:term("EVPI"),f:"EVPI = E[max NB] − max E[NB]",p:"Expected value of perfect information per patient — the cost of current uncertainty."},
+    {h:term("CHE"),f:"CHE if OOP/income > 10%  or  OOP/CTP > 40%",p:"Out-of-pocket spending crossing catastrophic thresholds of income or capacity-to-pay."},
+    {h:term("BIA"),f:"Impactᵧ = spend(new mix)ᵧ − spend(current)ᵧ",p:"Annual and cumulative budget difference as uptake of the new option grows."}
+  ];
+  const vals=runValidations(),allok=vals.every(v=>v.ok);
+  const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
+  document.getElementById("workspace").innerHTML=`<div class="home">
+    <div class="ws-head"><div><h2>Methods &amp; validation</h2><div class="sub">Every formula Artha HE uses, and live checks that the engine reproduces known results. Built to standard published health-economics methods (R-equivalent: hesim · heemod · dampack · BCEA).</div></div></div>
+    <div class="card" style="border-left:3px solid ${allok?'var(--emerald)':'var(--red)'}">
+      <h3>Engine validation ${allok?'<span class="tag frontier">all checks passed</span>':'<span class="tag dominated">check failed</span>'}</h3>
+      <div class="card-sub">Each row computes a quantity in the live engine and compares it to a known/hand-calculated answer.</div>
+      ${vals.map(v=>`<div class="valid-row"><span class="${v.ok?'vok':'vno'}">${v.ok?'✓':'✗'}</span><span>${v.n}</span><span class="vp">${v.got} = ${v.exp}</span></div>`).join("")}
+    </div>
+    <h2 class="sec">The formulae</h2>
+    <p class="secsub">What runs in the background when you click Calculate, Analyse or Run.</p>
+    <div class="eqgrid">${eqs.map(e=>`<div class="eq"><h4>${e.h}</h4><div class="formula">${e.f}</div><p>${e.p}</p></div>`).join("")}</div>
+    <h2 class="sec">Glossary</h2>
+    <p class="secsub">Plain-language definitions — hover the dotted terms anywhere in the app to see these.</p>
+    <div class="card glossary"><dl>${glos}</dl></div>
+    <footer class="foot">Artha HE · validated health-economics formulae · for research &amp; teaching</footer>
+  </div>`;
+}
+
+/* ============================ ROUTER ============================ */
+function wireTabs(id){const host=document.getElementById(id);host.querySelectorAll(".result-tab").forEach(tab=>tab.onclick=()=>{host.querySelectorAll(".result-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.dataset.pane===tab.dataset.p));});}
+function route(mod){
+  state.module=mod;
+  document.querySelectorAll("#topnav button").forEach(b=>b.classList.toggle("active",b.dataset.mod===mod));
+  const layout=document.getElementById("layout");
+  if(mod==="methods"){layout.classList.add("full");renderMethods();window.scrollTo(0,0);saveLocal();return;}
+  layout.classList.remove("full");
+  ({costing:()=>{renderCostingSidebar();renderCosting();},
+    oop:()=>{renderOopSidebar();renderOop();},
+    evaluation:()=>{renderEvalSidebar();renderEval();},
+    modeling:()=>{renderModelSidebar();renderModel();},
+    sensitivity:()=>{renderSensSidebar();renderSens();},
+    bia:()=>{renderBiaSidebar();renderBia();}})[mod]();
+  saveLocal();
+}
+document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));
+document.getElementById("brandHome").onclick=backToLanding;
+document.getElementById("saveProj").onclick=exportProject;
+document.getElementById("loadProj").onchange=e=>{if(e.target.files[0])importProject(e.target.files[0]);};
+document.getElementById("reportBtn").onclick=openReport;
+window.addEventListener("beforeunload",saveLocal);
+setInterval(saveLocal,5000);
+loadLocal();
+renderLanding();

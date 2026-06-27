@@ -1,0 +1,8 @@
+item,category,quantity,unit_cost,year
+Outpatient consultation,Direct medical,4,300,2022
+HbA1c test,Direct medical,2,450,2022
+Metformin (1 month),Direct medical,12,120,2023
+Insulin (1 month),Direct medical,6,900,2023
+Nursing time (hour),Direct medical,3,250,2022
+Patient travel,Direct non-medical,8,150,2024
+Lost work day,Indirect (productivity),5,700,2024
