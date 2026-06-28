@@ -142,23 +142,44 @@ function computeEvaluation(e) {
   const req = evalRequirements(e.type, e.strats);
   if (e.type === "CBA") {
     const d = e.strats.map(s => ({ strategy: s.strategy, cost: +s.cost, benefit: +s.effect, net: +s.effect - +s.cost, bcr: (+s.cost) ? (+s.effect) / (+s.cost) : 0 })).sort((a, b) => b.net - a.net);
-    return { type: e.type, requirements: req, rows: d, best: d[0] };
+    const interpretation = [
+      `${d[0].strategy} gives the highest net monetary benefit (${fmtINR(d[0].net)}), with a benefit–cost ratio of ${fmtNum(d[0].bcr, 2)}.`,
+      `A benefit–cost ratio above 1 means monetised benefits exceed costs; in the chart, taller bars indicate better value for money.`,
+      `Cost-benefit needs outcomes credibly valued in money (e.g. willingness-to-pay, human-capital, or productivity methods) — state your valuation method and source when reporting.`
+    ];
+    return { type: e.type, requirements: req, rows: d, best: d[0], interpretation };
   }
   if (e.type === "CMA") {
     const d = e.strats.map(s => ({ strategy: s.strategy, cost: +s.cost, effect: +s.effect })).sort((a, b) => a.cost - b.cost);
     const eff = e.strats.map(s => +s.effect), mean = sum(eff) / eff.length, equal = mean === 0 || (Math.max(...eff) - Math.min(...eff)) / Math.abs(mean) < 0.03;
-    return { type: e.type, requirements: req, rows: d, best: d[0], equal };
+    const interpretation = [
+      `${d[0].strategy} is the least-costly option (${fmtINR(d[0].cost)}) and is recommended — cost-minimisation assumes the options achieve equivalent outcomes.`,
+      equal ? `The outcomes entered are effectively equal, so choosing on cost alone is appropriate here.` : `The outcomes entered are NOT equal — cost-minimisation may be inappropriate; consider a CEA or CUA instead.`,
+      `When reporting, document the evidence that outcomes are equivalent (e.g. a non-inferiority trial or equivalence study).`
+    ];
+    return { type: e.type, requirements: req, rows: d, best: d[0], equal, interpretation };
   }
   if (e.type === "CCA") {
     const d = e.strats.map(s => ({ strategy: s.strategy, cost: +s.cost, effect: +s.effect })).sort((a, b) => a.cost - b.cost);
-    return { type: e.type, requirements: req, rows: d };
+    const interpretation = [
+      `Cost-consequence lays out the cost and the outcome(s) of each option side by side, without combining them into a single ratio.`,
+      `Compare each option's cost against its outcomes and judge which trade-off is acceptable for your population and budget.`,
+      `This is well suited to public-health programmes and policies where outcomes are multiple or not easily converted to QALYs.`
+    ];
+    return { type: e.type, requirements: req, rows: d, interpretation };
   }
   const d = icerIncremental(e.strats), ref = [...d].sort((a, b) => a.cost - b.cost)[0];
   d.forEach(s => s.nmb = nmb(s.cost, s.effect, e.wtp));
   const onFr = d.filter(s => s.status === "frontier");
   const best = onFr.filter(s => s.icer == null || s.icer <= e.wtp).slice(-1)[0] || ref;
   const plane = d.map(s => ({ label: s.strategy, dEff: s.effect - ref.effect, dCost: s.cost - ref.cost, ref: s.strategy === ref.strategy }));
-  return { type: e.type, requirements: req, rows: d.sort((a, b) => a.cost - b.cost), plane, best, wtp: e.wtp, unit: e.type === "CUA" ? "QALY" : "unit" };
+  const unit = e.type === "CUA" ? "QALY" : "unit", nDom = d.filter(s => s.status === "dominated").length;
+  const interpretation = [
+    `At a willingness-to-pay of ${fmtINR(e.wtp)} per ${unit}, ${best.strategy} is the cost-effective choice${best.icer == null ? " (the least-costly option on the efficiency frontier)" : `, with an ICER of ${fmtINR(best.icer)} per ${unit}`}.`,
+    `On the cost-effectiveness plane, options toward the lower-right are better value; any point below the dashed line is cost-effective at this threshold.`,
+    `${nDom ? nDom + " option(s) are dominated and excluded. " : ""}The conclusion depends on the threshold and the cost/effect inputs — test their uncertainty in the Sensitivity tab.`
+  ];
+  return { type: e.type, requirements: req, rows: d.sort((a, b) => a.cost - b.cost), plane, best, wtp: e.wtp, unit, interpretation };
 }
 function computeModel(m) {
   const res = modelRunAll(m), lowerBetter = m.outcome === "DALY";
@@ -171,7 +192,14 @@ function computeModel(m) {
   const as = m.strategies[m.activeStrat] || m.strategies[0];
   const trace = markovGeneric(m, as).trace;
   const series = m.states.map((st, si) => ({ label: st.name, idx: si, data: trace.map((row, t) => ({ x: t * m.cycle, y: row[si] })) }));
-  return { rows: inc.sort((a, b) => a.cost - b.cost), plane, best, unit, onFr: onFr.length, strategies: m.strategies.length, states: m.states.length, activeName: as.name, series, stateNames: m.states.map(s => s.name), wtp: m.wtp, horizon: m.horizon, dCost: m.dCost, outcome: m.outcome };
+  const ce = best.icer == null || best.icer <= m.wtp;
+  const cmp = inc.find(s => s.icer != null) || best;
+  const interpretation = [
+    `Over a ${m.horizon}-year horizon, ${best.name} is optimal at a willingness-to-pay of ${fmtINR(m.wtp)} per ${unit}${best.icer == null ? " (the least-costly strategy on the frontier)" : `, with an ICER of ${fmtINR(best.icer)} per ${unit}` } — ${ce ? "cost-effective" : "not cost-effective"} at this threshold.`,
+    `The cohort trace shows how the modelled population moves between the ${m.states.length} health states over time; the cost-effectiveness plane summarises each strategy against the cheapest.`,
+    `These are deterministic (point-estimate) results — run the Sensitivity tab (PSA) to see how parameter uncertainty changes the probability of cost-effectiveness.`
+  ];
+  return { rows: inc.sort((a, b) => a.cost - b.cost), plane, best, unit, onFr: onFr.length, strategies: m.strategies.length, states: m.states.length, activeName: as.name, series, stateNames: m.states.map(s => s.name), wtp: m.wtp, horizon: m.horizon, dCost: m.dCost, outcome: m.outcome, interpretation };
 }
 function computeSensitivity(p) {
   const m = p.model, N = p.N, iRef = Math.min(p.ref ?? 0, m.strategies.length - 1), iCmp = Math.min(p.cmp ?? 1, m.strategies.length - 1), wtp = p.wtp;

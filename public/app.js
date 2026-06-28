@@ -28,6 +28,8 @@ async function api(name,payload){
 }
 function wsBusy(msg){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>${msg||"Computing…"}</h2><div class="sub">Running on the server…</div></div></div>`;}
 function wsError(e){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>Couldn't compute</h2><div class="sub">${(e&&e.message)||e}. Check your inputs and try again.</div></div></div>`;}
+function interpCard(arr){if(!arr||!arr.length)return"";return `<div class="card interp"><h3>How to read this result</h3><ol class="interp-list">${arr.map(t=>`<li>${t}</li>`).join("")}</ol></div>`;}
+function addInterp(R){const ws=document.getElementById("workspace");if(R&&R.interpretation)ws.insertAdjacentHTML("beforeend",interpCard(R.interpretation));}
 const EVAL_TYPES={
   CMA:{name:"Cost-minimisation",abbr:"CMA",eff:"Outcome (assumed equal)",wtp:false,def:"Use when the health outcomes of the options are equivalent — then only costs matter; the cheapest wins.",req:["Total cost for each option","Evidence that outcomes are equal/equivalent"]},
   CEA:{name:"Cost-effectiveness",abbr:"CEA",eff:"Effect — natural unit (e.g. life-years)",wtp:true,def:"Cost per unit of a single natural outcome (life-years gained, cases averted, mmHg). ICER vs the next option.",req:["Total cost for each option","A common natural-unit effect for each option"]},
@@ -63,9 +65,23 @@ const TEMPLATES={
 function dlTemplate(k){const[n,c]=TEMPLATES[k];download(n,c);}
 function activeSVG(){return document.querySelector("#workspace .pane.active svg.chart")||document.querySelector("#workspace svg.chart");}
 function wsTables(){const a=[...document.querySelectorAll("#workspace .pane.active table")];const t=a.length?a:[...document.querySelectorAll("#workspace table")];return t.map(x=>x.outerHTML).join("<br>");}
-function exportPNG(title){const svg=activeSVG();if(!svg)return alert("No chart on this view to export.");const cl=svg.cloneNode(true);const vb=svg.viewBox.baseVal;const w=vb&&vb.width?vb.width:700,h=vb&&vb.height?vb.height:440;cl.setAttribute("width",w);cl.setAttribute("height",h);
+function chartMeta(title){const svg=activeSVG();if(!svg)return null;const card=svg.closest(".card")||svg.parentElement;
+  const h3=card&&card.querySelector("h3")?card.querySelector("h3").textContent.trim():title;
+  const sub=card&&card.querySelector(".card-sub")?card.querySelector(".card-sub").textContent.trim():"";
+  return {svg,h3,sub};}
+function wrapText(ctx,text,x,y,maxW,lh){const words=text.split(" ");let line="";for(const wd of words){const t=line+wd+" ";if(ctx.measureText(t).width>maxW&&line){ctx.fillText(line.trim(),x,y);line=wd+" ";y+=lh;}else line=t;}ctx.fillText(line.trim(),x,y);return y;}
+function exportPNG(title){const m=chartMeta(title);if(!m)return alert("No chart on this view to export.");const svg=m.svg;
+  const cl=svg.cloneNode(true);const vb=svg.viewBox.baseVal;const w=vb&&vb.width?vb.width:700,h=vb&&vb.height?vb.height:440;cl.setAttribute("width",w);cl.setAttribute("height",h);
   const xml=new XMLSerializer().serializeToString(cl),url="data:image/svg+xml;base64,"+btoa(unescape(encodeURIComponent(xml))),img=new Image();
-  img.onload=()=>{const sc=2,cv=document.createElement("canvas");cv.width=w*sc;cv.height=h*sc;const x=cv.getContext("2d");x.scale(sc,sc);x.fillStyle="#fff";x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);cv.toBlob(b=>dl(b,title+".png"));};
+  img.onload=()=>{const sc=2,padX=26,headH=m.sub?96:64,footH=30,cw=w+padX*2,chh=h+headH+footH;
+    const cv=document.createElement("canvas");cv.width=cw*sc;cv.height=chh*sc;const x=cv.getContext("2d");x.scale(sc,sc);
+    x.fillStyle="#fff";x.fillRect(0,0,cw,chh);
+    x.fillStyle="#C8971F";x.fillRect(0,0,cw,5);
+    x.fillStyle="#1A1733";x.font="700 21px Georgia, 'Times New Roman', serif";x.fillText(m.h3,padX,42);
+    if(m.sub){x.fillStyle="#6E6A86";x.font="13px Arial";wrapText(x,m.sub,padX,64,cw-padX*2,16);}
+    x.drawImage(img,padX,headH,w,h);
+    x.fillStyle="#9B97B4";x.font="11px Arial";x.fillText("Artha HE · Developed by Dr G Hari Prakash · "+new Date().toLocaleDateString("en-IN"),padX,headH+h+20);
+    cv.toBlob(b=>dl(b,title.replace(/\s+/g,"_")+".png"));};
   img.onerror=()=>alert("PNG export failed for this chart.");img.src=url;}
 function exportXLS(title){
   const a=[...document.querySelectorAll("#workspace .pane.active table")];
@@ -78,8 +94,10 @@ function exportXLS(title){
   const html='<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>'+title+"</h3>"+wsTables()+"</body></html>";
   dl(new Blob(["﻿"+html],{type:"application/vnd.ms-excel"}),title.replace(/\s+/g,"_")+".xls");
 }
-function exportDOC(title){const svg=activeSVG();const html='<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:5px;font-size:12px}</style></head><body><h2>'+title+"</h2>"+(svg?svg.outerHTML:"")+wsTables()+'<p style="color:#777;font-size:10px">Generated by Artha HE — validated health-economics formulae (R-equivalent methods).</p></body></html>';dl(new Blob(["﻿"+html],{type:"application/msword"}),title.replace(/\s+/g,"_")+".doc");}
-function exportPDF(title){const svg=activeSVG(),w=window.open("","_blank");if(!w)return alert("Allow pop-ups to export PDF.");w.document.write('<html><head><title>'+title+'</title><style>body{font-family:Arial,sans-serif;padding:26px;color:#1A1733}h1{font-size:22px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid #ccc;padding:6px;text-align:right;font-size:12px}th:first-child,td:first-child{text-align:left}svg{max-width:100%}</style></head><body><h1>'+title+"</h1>"+(svg?svg.outerHTML:"")+wsTables()+'<p style="color:#888;font-size:11px">Generated by Artha HE — validated health-economics formulae (R-equivalent methods).</p></body></html>');w.document.close();setTimeout(()=>{w.focus();w.print();},350);}
+function exportDOC(title){const m=chartMeta(title);const cap=m?('<h3 style="color:#5B4BD6;margin-bottom:2px">'+m.h3+'</h3>'+(m.sub?'<p style="color:#666;font-size:12px;margin-top:0">'+m.sub+'</p>':'')+m.svg.outerHTML):'';
+  const html='<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:5px;font-size:12px}h1{color:#241F46}</style></head><body><h1>'+title+"</h1>"+cap+wsTables()+'<p style="color:#777;font-size:10px">Generated by Artha HE · Developed by Dr G Hari Prakash · '+new Date().toLocaleDateString("en-IN")+'</p></body></html>';dl(new Blob(["﻿"+html],{type:"application/msword"}),title.replace(/\s+/g,"_")+".doc");}
+function exportPDF(title){const m=chartMeta(title),w=window.open("","_blank");if(!w)return alert("Allow pop-ups to export PDF.");const cap=m?('<h2 style="font-size:16px;color:#5B4BD6;margin-bottom:2px">'+m.h3+'</h2>'+(m.sub?'<p style="color:#666;font-size:12px;margin-top:0">'+m.sub+'</p>':'')+m.svg.outerHTML):'';
+  w.document.write('<html><head><title>'+title+'</title><style>body{font-family:Arial,sans-serif;padding:26px;color:#1A1733}h1{font-size:22px;border-bottom:3px solid #C8971F;padding-bottom:6px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid #ccc;padding:6px;text-align:right;font-size:12px}th:first-child,td:first-child{text-align:left}svg{max-width:100%}</style></head><body><h1>'+title+"</h1>"+cap+wsTables()+'<p style="color:#888;font-size:11px">Generated by Artha HE · Developed by Dr G Hari Prakash · '+new Date().toLocaleDateString("en-IN")+'</p></body></html>');w.document.close();setTimeout(()=>{w.focus();w.print();},350);}
 const EXPORT_BAR='<div class="exp-bar"><button class="btn btn-ghost sm" data-exp="png">PNG</button><button class="btn btn-ghost sm" data-exp="xls">Excel</button><button class="btn btn-ghost sm" data-exp="doc">Word</button><button class="btn btn-ghost sm" data-exp="pdf">PDF</button></div>';
 function wireExports(title){document.querySelectorAll("#workspace [data-exp]").forEach(b=>b.onclick=()=>({png:exportPNG,xls:exportXLS,doc:exportDOC,pdf:exportPDF})[b.dataset.exp](title));}
 
@@ -99,19 +117,19 @@ async function openReport(){
 function svgWrap(w,h,i){return`<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${i}</svg>`;}
 function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="${o.mono?"IBM Plex Mono":"Plus Jakarta Sans"}" font-weight="${o.weight||400}">${s}</text>`;}
 function barChartH(data){const W=660,rh=50,H=data.length*rh+28,padL=185,padR=120,max=Math.max(...data.map(d=>d.value),1),bw=W-padL-padR;let g="";
-  data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"/>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
+  data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"><title>${d.label}: ${d.tag}</title></rect>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
   return svgWrap(W,H,g);}
 function barChartV(data,fmt){const W=660,H=380,ox=70,oy=H-50,pw=W-ox-30,ph=oy-24,max=Math.max(...data.map(d=>Math.abs(d.value)),1)*1.1;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`;g+=txt(ox-8,yy+4,fmt(max*i/4),{anchor:"end",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  data.forEach((d,i)=>{const bw=pw/data.length*.5,x=ox+(i+.5)*pw/data.length-bw/2,bh=(d.value/max)*ph;g+=`<rect x="${x}" y="${oy-bh}" width="${bw}" height="${bh}" rx="6" fill="${d.color||SERIES[i%6]}"/>`;g+=txt(ox+(i+.5)*pw/data.length,oy+18,d.label,{anchor:"middle",fill:C.muted,size:11});});
+  data.forEach((d,i)=>{const bw=pw/data.length*.5,x=ox+(i+.5)*pw/data.length-bw/2,bh=(d.value/max)*ph;g+=`<rect x="${x}" y="${oy-bh}" width="${bw}" height="${bh}" rx="6" fill="${d.color||SERIES[i%6]}"><title>${d.label}: ${fmt(d.value)}</title></rect>`;g+=txt(ox+(i+.5)*pw/data.length,oy+18,d.label,{anchor:"middle",fill:C.muted,size:11});});
   return svgWrap(W,H,g);}
 function cePlane(points,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...points.map(p=>Math.abs(p.dEff)))*1.3,yMax=Math.max(1,...points.map(p=>Math.abs(p.dCost)))*1.3,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
   g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
   const cap=Math.min(yMax,wtp*xMax);g+=`<line x1="${ox}" y1="${oy}" x2="${X(cap/wtp)}" y2="${Y(cap)}" stroke="${C.emerald}" stroke-dasharray="7 5" stroke-width="1.6"/>`;
   g+=txt(X(cap/wtp)-6,Y(cap)-8,"WTP "+compactINR(wtp)+"/QALY",{anchor:"end",fill:C.emerald,size:11,weight:600});
   g+=txt(ox+pw,oy+22,"+ effect →",{anchor:"end",fill:C.muted,size:11})+txt(ox+8,26,"↑ + cost",{fill:C.muted,size:11});
-  points.forEach(p=>{g+=`<circle cx="${X(p.dEff)}" cy="${Y(p.dCost)}" r="7" fill="${p.ref?C.muted:C.primary}" stroke="#fff" stroke-width="1.5"/>`+txt(X(p.dEff)+12,Y(p.dCost)+4,p.label,{fill:C.ink,size:12,weight:500});});
+  points.forEach(p=>{g+=`<circle cx="${X(p.dEff)}" cy="${Y(p.dCost)}" r="7" fill="${p.ref?C.muted:C.primary}" stroke="#fff" stroke-width="1.5"><title>${p.label} — Δcost ${compactINR(p.dCost)}, Δeffect ${(+p.dEff).toFixed(3)}</title></circle>`+txt(X(p.dEff)+12,Y(p.dCost)+4,p.label,{fill:C.ink,size:12,weight:500});});
   return svgWrap(W,H,g);}
 function scatterPSA(d,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...d.map(x=>Math.abs(x.incEff)))*1.2,yMax=Math.max(1,...d.map(x=>Math.abs(x.incCost)))*1.2,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
   g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
@@ -122,7 +140,8 @@ function scatterPSA(d,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,
 function lineChart(series,xlab,xmax){const W=680,H=380,ox=66,oy=H-50,pw=W-ox-26,ph=oy-22,yMax=Math.max(...series.flatMap(s=>s.data.map(d=>d.y)),.001)*1.05,X=v=>ox+(v/xmax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(yMax*i/4).toFixed(yMax<3?2:0),{anchor:"end",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  series.forEach((s,si)=>{g+=`<polyline points="${s.data.map(d=>`${X(d.x)},${Y(d.y)}`).join(" ")}" fill="none" stroke="${s.color||SERIES[si%6]}" stroke-width="2.4"/>`;});
+  series.forEach((s,si)=>{g+=`<polyline points="${s.data.map(d=>`${X(d.x)},${Y(d.y)}`).join(" ")}" fill="none" stroke="${s.color||SERIES[si%6]}" stroke-width="2.4"><title>${s.label}</title></polyline>`;
+    s.data.forEach(d=>{g+=`<circle cx="${X(d.x)}" cy="${Y(d.y)}" r="3" fill="${s.color||SERIES[si%6]}" opacity="0"><title>${s.label} · year ${d.x}: ${(d.y*100).toFixed(1)}%</title></circle>`;});});
   g+=txt(ox+pw/2,H-12,xlab,{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
 function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xmax=curve[curve.length-1].wtp,X=v=>ox+(v/xmax)*pw,Y=v=>oy-v*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
@@ -132,7 +151,7 @@ function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xm
   g+=txt(ox+pw/2,H-12,"Willingness-to-pay per QALY (₹)",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
 function tornado(rows){const W=680,rh=44,H=rows.length*rh+38,padL=200,mid=padL+(W-padL-40)/2,max=Math.max(...rows.map(r=>Math.max(Math.abs(r.high-r.base),Math.abs(r.low-r.base))),1),half=(W-padL-40)/2,scale=v=>(v/max)*half;let g="";
   g+=`<line x1="${mid}" y1="12" x2="${mid}" y2="${H-20}" stroke="${C.ink}" stroke-width="1.2"/>`+txt(mid,H-6,"Net monetary benefit swing",{anchor:"middle",fill:C.muted,size:10.5});
-  rows.forEach((r,i)=>{const y=18+i*rh,loW=scale(r.base-r.low),hiW=scale(r.high-r.base);g+=`<rect x="${mid-loW}" y="${y}" width="${loW}" height="24" rx="4" fill="${C.amber}"/><rect x="${mid}" y="${y}" width="${hiW}" height="24" rx="4" fill="${C.primary}"/>`+txt(padL-14,y+17,r.label,{anchor:"end",fill:C.ink,size:12});});
+  rows.forEach((r,i)=>{const y=18+i*rh,loW=scale(r.base-r.low),hiW=scale(r.high-r.base);g+=`<rect x="${mid-loW}" y="${y}" width="${loW}" height="24" rx="4" fill="${C.amber}"><title>${r.label} — low: NMB ${compactINR(r.low)}</title></rect><rect x="${mid}" y="${y}" width="${hiW}" height="24" rx="4" fill="${C.primary}"><title>${r.label} — high: NMB ${compactINR(r.high)}</title></rect>`+txt(padL-14,y+17,r.label,{anchor:"end",fill:C.ink,size:12});});
   return svgWrap(W,H,g);}
 
 /* ============================ STATE ============================ */
@@ -185,6 +204,17 @@ function renderLanding(){
     {a:"BIA",cls:"gold",go:"bia",h:"Budget impact analysis",p:"Affordability for the payer: annual and cumulative spend as a new treatment is adopted."},
     {a:"ICER",cls:"ink",h:"Incremental cost-effectiveness ratio",p:"Δcost ÷ Δeffect between options, with strong and extended dominance detected automatically."}
   ];
+  const guide=[
+    {t:"Micro-costing (bottom-up)",what:"Builds the cost of a service, programme or intervention from the ground up — every resource used, costed individually.",data:"For each resource: staff time + salary, consumables, equipment, space, quantity used, unit cost and price year. Staff are costed by salary × time-share; equipment is annualised over its useful life (+ maintenance).",how:["List every resource used","Enter quantity × unit cost (salary × time-share for staff; annualised cost for equipment)","Group by cost category","Express all costs in one price year"]},
+    {t:"Gross-costing (top-down)",what:"Divides a total budget by the number of output units — quick when only aggregate spend is known.",data:"Total expenditure of the cost centre, and the number of output units (patients treated, visits, tests, doses delivered).",how:["Take the total cost of the service","Count the output units produced","Cost per unit = total ÷ output"]},
+    {t:"Out-of-pocket & catastrophic expenditure",what:"What patients/households pay directly, and whether that payment is financially catastrophic.",data:"Direct medical (consultation, drugs, tests, hospitalisation), direct non-medical (transport, food, lodging), indirect (lost income); plus household income and non-food expenditure.",how:["Enter each payment by category","Add household income & capacity-to-pay","Compare OOP to thresholds (10%/25% income, 40% capacity-to-pay)"]},
+    {t:"Cost-effectiveness (CEA)",what:"Cost per unit of a single natural outcome — life-years gained, cases averted, mmHg reduced, children fully immunised.",data:"Total cost and the common natural-unit effect for each option being compared.",how:["Enter cost & effect per option","ICER = Δcost ÷ Δeffect vs the next best option","Compare the ICER to your threshold"]},
+    {t:"Cost-utility (CUA)",what:"Cost per QALY (or DALY averted) — captures both quality and length of life. The HTA standard.",data:"Total cost and QALYs (utility × time) for each option. DALYs may be used in LMIC/GBD work.",how:["Enter cost & QALYs per option","Compute the ICER per QALY","Compare to 1× / 3× GDP per capita"]},
+    {t:"Cost-benefit (CBA)",what:"Costs and outcomes both expressed in money — lets you compare across very different programmes.",data:"Total cost and a monetised benefit (₹) for each option (e.g. willingness-to-pay or productivity value).",how:["Enter cost & monetised benefit","Net benefit = benefit − cost","Benefit-cost ratio > 1 = worthwhile"]},
+    {t:"Decision modelling (Markov)",what:"Projects costs and outcomes over time across health states — for chronic disease, screening or long-run programmes.",data:"Health states, transition probabilities, state costs & utilities, time horizon and discount rate.",how:["Define the health states","Fill each strategy's transition matrix (rows sum to 1)","Run the cohort → read the ICER and trace"]},
+    {t:"Sensitivity analysis (DSA / PSA)",what:"Tests how robust the conclusion is to uncertainty in the inputs.",data:"Plausible ranges (deterministic) or distributions (probabilistic) for the key parameters.",how:["One-way: vary each parameter → tornado","Probabilistic: Monte-Carlo → CEAC & EVPI","Read the probability of being cost-effective"]},
+    {t:"Budget impact analysis (BIA)",what:"The payer's affordability question — total additional spend over time as a new option is adopted.",data:"Eligible population, uptake over time, current vs new cost per patient, and the time horizon.",how:["Size the eligible population","Set uptake over the horizon","Read annual & cumulative budget impact"]}
+  ];
   document.getElementById("landing").innerHTML=`
     <div class="lhead">
       <div class="brand"><div class="logo">अ</div><div><div class="name">Artha<b> HE</b></div><div class="tagline">Health Economics Workbench</div></div></div>
@@ -197,7 +227,7 @@ function renderLanding(){
         <div class="logo-hero"><div class="ring"></div><div class="tile">अ</div></div>
         <div style="flex:1;min-width:280px">
           <h1>Artha <b>HE</b></h1>
-          <p class="lead">A friendly workbench that turns your data into full health-economic analyses — costing, out-of-pocket burden, cost-effectiveness, modeling, sensitivity and budget impact — with the complex maths handled for you.</p>
+          <p class="lead">Health economics is not just about medicines — it covers <b>public-health programmes, screening, vaccination, policies and service-delivery interventions</b> in community medicine too. Artha HE turns your data into full economic analyses — costing, out-of-pocket burden, cost-effectiveness, modelling, sensitivity and budget impact — with the complex maths handled for you.</p>
           <div class="pills"><span class="pill">Researchers</span><span class="pill">Teaching</span><span class="pill">India / LMIC</span><span class="pill">Payers / HTA</span></div>
           <div class="cta"><button class="btn btn-primary btn-lg" id="ctaStart">Enter the Workbench →</button>
             <button class="btn btn-secondary btn-lg" id="ctaMethods">See the methods</button></div>
@@ -219,6 +249,17 @@ function renderLanding(){
     <div class="defs" id="defGrid">
       ${defs.map(d=>`<div class="def" ${d.go?`data-go="${d.go}"`:""}>
         <span class="abbr ${d.cls}">${d.a}</span><h4>${d.h}</h4><p>${d.p}</p>${d.go?'<span class="go">Open tool →</span>':""}</div>`).join("")}
+    </div>
+
+    <h2 class="sec">How to do each analysis — and what data you need</h2>
+    <p class="secsub">New to health economics? Each card explains what the method is, the data it requires, and the steps to run it — so you know exactly what to prepare before you start.</p>
+    <div class="guide">
+      ${guide.map(gd=>`<div class="gcard">
+        <h4>${gd.t}</h4>
+        <div class="grow"><span class="glab">What it is</span><p>${gd.what}</p></div>
+        <div class="grow"><span class="glab">Data you need</span><p>${gd.data}</p></div>
+        <div class="grow"><span class="glab">How to do it</span><ol class="gsteps">${gd.how.map(s=>`<li>${s}</li>`).join("")}</ol></div>
+      </div>`).join("")}
     </div>
 
     <div class="method" id="methods">
@@ -375,7 +416,7 @@ async function renderEval(){
       <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>Net monetary benefit</h3><div class="card-sub">Monetised benefit minus cost for each option.</div>${barChartV(bars,compactINR)}</div></div></div>
       <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Benefit</th><th>Net benefit</th><th>BCR</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CBA");return;
+    wireTabs("evTabs");wireExports("Artha CBA");addInterp(R);return;
   }
   if(e.type==="CMA"){
     const d=R.rows,best=R.best,equal=R.equal;
@@ -384,7 +425,7 @@ async function renderEval(){
       <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Cost comparison</button><button class="result-tab" data-p="req">Requirements</button></div>
       <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div>${equal?"":'<p class="note">Outcomes differ across options — cost-minimisation assumes equivalence. A CEA or CUA may be more appropriate.</p>'}</div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CMA");return;
+    wireTabs("evTabs");wireExports("Artha CMA");addInterp(R);return;
   }
   if(e.type==="CCA"){
     const rows=R.rows.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(+s.cost)}</td><td>${fmtNum(+s.effect,2)}</td></tr>`).join("");
@@ -392,7 +433,7 @@ async function renderEval(){
       <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Balance sheet</button><button class="result-tab" data-p="req">Requirements</button></div>
       <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CCA");return;
+    wireTabs("evTabs");wireExports("Artha CCA");addInterp(R);return;
   }
   /* CEA / CUA */
   const d=R.rows,best=R.best,pts=R.plane,unit=R.unit;
@@ -403,7 +444,7 @@ async function renderEval(){
     <div class="pane active" data-pane="plane"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each option vs the cheapest. Dashed line = willingness-to-pay threshold.</div>${cePlane(pts,e.wtp)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.muted}"></span>Reference</div><div class="item"><span class="sw" style="background:${C.primary}"></span>Comparator</div><div class="item"><span class="sw" style="background:${C.emerald};height:3px;width:18px"></span>WTP threshold</div></div></div></div>
     <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>${unit==="QALY"?"QALYs":"Effect"}</th><th>Δ Cost</th><th>Δ Eff</th><th>ICER</th><th style="text-align:left">Status</th><th>NMB</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
     <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-  wireTabs("evTabs");wireExports("Artha "+e.type);
+  wireTabs("evTabs");wireExports("Artha "+e.type);addInterp(R);
 }
 
 /* ============================ MODELING ============================ */
@@ -462,7 +503,7 @@ async function renderModel(){
     <div class="pane active" data-pane="trace"><div class="card flush"><div class="pad"><h3>Cohort trace — ${R.activeName}</h3><div class="card-sub">Share of the cohort in each state over time (switch strategy in the sidebar).</div>${lineChart(series,"Years",m.horizon)}</div><div class="legend">${m.states.map((s,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${s.name}</div>`).join("")}</div></div></div>
     <div class="pane" data-pane="ce"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each strategy vs the cheapest. ${lowerBetter?"X = DALYs averted (right is better).":"X = incremental QALYs."}</div>${cePlane(pts,m.wtp)}</div></div></div>
     <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>QALYs</th><th>DALYs</th><th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div><p class="note">ICER in ₹ per ${unit}. India thresholds: 1×GDP ≈ ${fmtINR(GDP_PC)}, 3×GDP ≈ ${fmtINR(GDP_PC*3)}.</p></div></div>`;
-  wireTabs("mTabs");wireExports("Artha Markov Model");
+  wireTabs("mTabs");wireExports("Artha Markov Model");addInterp(R);
 }
 
 /* ============================ SENSITIVITY ============================ */
@@ -603,5 +644,14 @@ document.getElementById("loadProj").onchange=e=>{if(e.target.files[0])importProj
 document.getElementById("reportBtn").onclick=openReport;
 window.addEventListener("beforeunload",saveLocal);
 setInterval(saveLocal,5000);
+/* draggable splitter between the entry (sidebar) and results (workspace) panels */
+(function(){
+  const bar=document.getElementById("dragbar");if(!bar)return;let drag=false;
+  bar.addEventListener("mousedown",e=>{drag=true;bar.classList.add("dragging");document.body.style.userSelect="none";document.body.style.cursor="col-resize";e.preventDefault();});
+  window.addEventListener("mousemove",e=>{if(!drag)return;const x=Math.max(300,Math.min(820,e.clientX));document.documentElement.style.setProperty("--sbw",x+"px");});
+  window.addEventListener("mouseup",()=>{if(!drag)return;drag=false;bar.classList.remove("dragging");document.body.style.userSelect="";document.body.style.cursor="";try{localStorage.setItem("arthaSBW",getComputedStyle(document.documentElement).getPropertyValue("--sbw").trim());}catch(e){}});
+  bar.addEventListener("dblclick",()=>{document.documentElement.style.setProperty("--sbw","408px");try{localStorage.removeItem("arthaSBW");}catch(e){}});
+  try{const w=localStorage.getItem("arthaSBW");if(w)document.documentElement.style.setProperty("--sbw",w);}catch(e){}
+})();
 loadLocal();
 renderLanding();
