@@ -267,7 +267,8 @@ const EX_NOTE={}, EX_CUR={};
 const RENDERERS={costing:["renderCostingSidebar","renderCosting"],oop:["renderOopSidebar","renderOop"],evaluation:["renderEvalSidebar","renderEval"],model:["renderModelSidebar","renderModel"],bia:["renderBiaSidebar","renderBia"]};
 function loadExample(mod,key){const ex=EXAMPLES[mod][key];if(!ex)return;const {note,...data}=JSON.parse(JSON.stringify(ex));Object.assign(state[mod],data);EX_NOTE[mod]=note;EX_CUR[mod]=key;const[sb,rn]=RENDERERS[mod];window[sb]();window[rn]();saveLocal();}
 function exRow(mod){const cur=EX_CUR[mod];const b=(k,l)=>`<button data-ex="${k}" class="${cur===k?'active':''}">${l}</button>`;
-  return `<div class="ex-row"><span class="ex-lab">Load an example</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
+  return `<div class="start-note"><span class="sn-title">▶ To run your analysis</span>Enter your own data in the fields below, or download a <b>template</b>, fill it in and upload — then click the button to run.</div>
+  <div class="ex-row"><span class="ex-lab">Just exploring? Load a worked example to see how it works</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
 function wireExamples(mod){document.querySelectorAll("#sidebar .ex-row [data-ex]").forEach(b=>b.onclick=()=>loadExample(mod,b.dataset.ex));}
 
 /* ============================ HOME ============================ */
@@ -318,6 +319,7 @@ function renderLanding(){
         <div class="logo-hero"><div class="ring"></div><div class="tile">अ</div></div>
         <div style="flex:1;min-width:280px">
           <h1>Artha <b>HE</b></h1>
+          <div class="hero-tag">Making health-economic analysis easy — for everyone.</div>
           <p class="lead">Health economics is not just about medicines — it covers <b>public-health programmes, screening, vaccination, policies and service-delivery interventions</b> in community medicine too. Artha HE turns your data into full economic analyses — costing, out-of-pocket burden, cost-effectiveness, modelling, sensitivity and budget impact — with the complex maths handled for you.</p>
           <div class="pills"><span class="pill">Researchers</span><span class="pill">Teaching</span><span class="pill">India / LMIC</span><span class="pill">Payers / HTA</span></div>
           <div class="cta"><button class="btn btn-primary btn-lg" id="ctaStart">Enter the Workbench →</button>
