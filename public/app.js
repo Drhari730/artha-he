@@ -190,6 +190,86 @@ const state={
   bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000}
 };
 
+/* ============================ EXAMPLES (general · public health · digital health) ====== */
+const EXAMPLES={
+  costing:{
+    general:{note:"General: cost of diabetes outpatient care (micro-costing).",method:"micro",toYear:2024,inflation:.05,rows:[
+      {item:"Outpatient consultation",category:"Direct medical",quantity:4,unit_cost:300,year:2022},
+      {item:"HbA1c test",category:"Direct medical",quantity:2,unit_cost:450,year:2022},
+      {item:"Metformin (1 month)",category:"Direct medical",quantity:12,unit_cost:120,year:2023},
+      {item:"Insulin (1 month)",category:"Direct medical",quantity:6,unit_cost:900,year:2023},
+      {item:"Nursing time (hour)",category:"Direct medical",quantity:3,unit_cost:250,year:2022},
+      {item:"Patient travel",category:"Direct non-medical",quantity:8,unit_cost:150,year:2024},
+      {item:"Lost work day",category:"Indirect (productivity)",quantity:5,unit_cost:700,year:2024}]},
+    public:{note:"Public health: cost of an immunization outreach session.",method:"micro",toYear:2024,inflation:.05,rows:[
+      {item:"ANM/ASHA staff time (hours)",category:"Direct medical",quantity:120,unit_cost:80,year:2024},
+      {item:"Vaccine vials",category:"Direct medical",quantity:200,unit_cost:150,year:2024},
+      {item:"AD syringes",category:"Direct medical",quantity:220,unit_cost:8,year:2024},
+      {item:"Cold-chain ice packs & upkeep",category:"Direct medical",quantity:1,unit_cost:3000,year:2023},
+      {item:"IEC materials & printing",category:"Direct non-medical",quantity:1,unit_cost:2500,year:2024},
+      {item:"Outreach transport",category:"Direct non-medical",quantity:10,unit_cost:300,year:2024},
+      {item:"Beneficiary travel & wait time",category:"Indirect (productivity)",quantity:200,unit_cost:50,year:2024}]},
+    digital:{note:"Digital health: running cost of a teleconsultation programme (per 1000 consults).",method:"micro",toYear:2024,inflation:.05,rows:[
+      {item:"App development (amortised/yr)",category:"Direct medical",quantity:1,unit_cost:40000,year:2023},
+      {item:"Cloud server & hosting (yr)",category:"Direct medical",quantity:1,unit_cost:24000,year:2024},
+      {item:"SMS / data charges",category:"Direct medical",quantity:1000,unit_cost:2,year:2024},
+      {item:"Teleconsult physician time (hr)",category:"Direct medical",quantity:170,unit_cost:600,year:2024},
+      {item:"Helpdesk / tech support (hr)",category:"Direct non-medical",quantity:100,unit_cost:200,year:2024},
+      {item:"Tablet/smartphone (amortised)",category:"Direct medical",quantity:5,unit_cost:3000,year:2024}]}
+  },
+  oop:{
+    general:{note:"General: out-of-pocket cost of a diabetes illness episode.",income:200000,nonFood:120000,items:[
+      {item:"Doctor consultation",category:"Direct medical",amount:1500},
+      {item:"Diagnostics / lab",category:"Direct medical",amount:3000},
+      {item:"Medicines",category:"Direct medical",amount:6000},
+      {item:"Hospitalization",category:"Direct medical",amount:25000},
+      {item:"Transport",category:"Direct non-medical",amount:2000},
+      {item:"Food & lodging (carer)",category:"Direct non-medical",amount:1500},
+      {item:"Lost wages",category:"Indirect (productivity)",amount:8000}]},
+    public:{note:"Public health: out-of-pocket burden on a TB patient despite free programme drugs.",income:120000,nonFood:80000,items:[
+      {item:"Pre-diagnosis private care",category:"Direct medical",amount:2500},
+      {item:"Out-of-programme diagnostics",category:"Direct medical",amount:1200},
+      {item:"Travel to DOTS centre",category:"Direct non-medical",amount:3000},
+      {item:"Nutrition supplements",category:"Direct non-medical",amount:4000},
+      {item:"Lost wages (treatment period)",category:"Indirect (productivity)",amount:15000}]},
+    digital:{note:"Digital health: out-of-pocket cost of a teleconsultation episode.",income:200000,nonFood:120000,items:[
+      {item:"Teleconsultation fee",category:"Direct medical",amount:300},
+      {item:"e-Prescription medicines",category:"Direct medical",amount:1200},
+      {item:"Mobile data pack",category:"Direct non-medical",amount:200},
+      {item:"Smartphone share (amortised)",category:"Direct non-medical",amount:500}]}
+  },
+  evaluation:{
+    general:{note:"General: three treatment options compared on cost per QALY.",type:"CUA",wtp:GDP_PC,strats:[
+      {strategy:"Standard care",cost:40000,effect:3.5},{strategy:"New drug A",cost:85000,effect:4.4},{strategy:"New drug B",cost:120000,effect:4.7}]},
+    public:{note:"Public health: cervical cancer screening strategies (cost per QALY).",type:"CUA",wtp:GDP_PC,strats:[
+      {strategy:"No screening",cost:0,effect:18.0},{strategy:"VIA screening",cost:8000,effect:18.6},{strategy:"HPV-DNA screening",cost:22000,effect:19.1}]},
+    digital:{note:"Digital health: a diabetes self-management app vs usual care (cost per QALY).",type:"CUA",wtp:GDP_PC,strats:[
+      {strategy:"Usual care",cost:45000,effect:7.8},{strategy:"mHealth app + usual care",cost:62000,effect:8.5}]}
+  },
+  model:{
+    general:{note:"General: a new treatment that slows disease progression (Healthy→Sick→Dead).",outcome:"QALY",activeStrat:1,states:[
+      {name:"Healthy",cost:2000,util:.92,dw:.05,absorbing:false},{name:"Sick",cost:14000,util:.62,dw:.40,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
+      strategies:[{name:"Standard care",addCost:0,matrix:[[.84,.15,.01],[0,.90,.10],[0,0,1]]},{name:"New treatment",addCost:9000,matrix:[[.893,.0975,.0095],[0,.90,.10],[0,0,1]]}]},
+    public:{note:"Public health: a screen-and-treat programme vs no programme.",outcome:"QALY",activeStrat:1,states:[
+      {name:"At risk",cost:500,util:.95,dw:.02,absorbing:false},{name:"Disease",cost:18000,util:.65,dw:.35,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
+      strategies:[{name:"No programme",addCost:0,matrix:[[.88,.11,.01],[0,.90,.10],[0,0,1]]},{name:"Screen & treat",addCost:800,matrix:[[.925,.07,.005],[0,.92,.08],[0,0,1]]}]},
+    digital:{note:"Digital health: a digital adherence tool vs standard care.",outcome:"QALY",activeStrat:1,states:[
+      {name:"On treatment",cost:3000,util:.85,dw:.10,absorbing:false},{name:"Poor control",cost:16000,util:.60,dw:.40,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
+      strategies:[{name:"Standard care",addCost:0,matrix:[[.80,.18,.02],[.20,.70,.10],[0,0,1]]},{name:"Digital adherence tool",addCost:1500,matrix:[[.90,.085,.015],[.35,.58,.07],[0,0,1]]}]}
+  },
+  bia:{
+    general:{note:"General: budget impact of adopting a new treatment.",population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000},
+    public:{note:"Public health: budget impact of a national screening rollout.",population:50000000,eligible:.02,maxUptake:.7,horizon:5,startYear:2025,costNew:1500,costOld:500},
+    digital:{note:"Digital health: budget impact (often savings) of a telemedicine programme.",population:2000000,eligible:.10,maxUptake:.5,horizon:5,startYear:2025,costNew:1200,costOld:2500}
+  }
+};
+const EX_NOTE={}, EX_CUR={};
+const RENDERERS={costing:["renderCostingSidebar","renderCosting"],oop:["renderOopSidebar","renderOop"],evaluation:["renderEvalSidebar","renderEval"],model:["renderModelSidebar","renderModel"],bia:["renderBiaSidebar","renderBia"]};
+function loadExample(mod,key){const ex=EXAMPLES[mod][key];if(!ex)return;const {note,...data}=JSON.parse(JSON.stringify(ex));Object.assign(state[mod],data);EX_NOTE[mod]=note;EX_CUR[mod]=key;const[sb,rn]=RENDERERS[mod];window[sb]();window[rn]();saveLocal();}
+function exRow(mod){const cur=EX_CUR[mod];const b=(k,l)=>`<button data-ex="${k}" class="${cur===k?'active':''}">${l}</button>`;
+  return `<div class="ex-row"><span class="ex-lab">Load an example</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
+function wireExamples(mod){document.querySelectorAll("#sidebar .ex-row [data-ex]").forEach(b=>b.onclick=()=>loadExample(mod,b.dataset.ex));}
+
 /* ============================ HOME ============================ */
 function renderLanding(){
   const defs=[
@@ -214,6 +294,17 @@ function renderLanding(){
     {t:"Decision modelling (Markov)",what:"Projects costs and outcomes over time across health states — for chronic disease, screening or long-run programmes.",data:"Health states, transition probabilities, state costs & utilities, time horizon and discount rate.",how:["Define the health states","Fill each strategy's transition matrix (rows sum to 1)","Run the cohort → read the ICER and trace"]},
     {t:"Sensitivity analysis (DSA / PSA)",what:"Tests how robust the conclusion is to uncertainty in the inputs.",data:"Plausible ranges (deterministic) or distributions (probabilistic) for the key parameters.",how:["One-way: vary each parameter → tornado","Probabilistic: Monte-Carlo → CEAC & EVPI","Read the probability of being cost-effective"]},
     {t:"Budget impact analysis (BIA)",what:"The payer's affordability question — total additional spend over time as a new option is adopted.",data:"Eligible population, uptake over time, current vs new cost per patient, and the time horizon.",how:["Size the eligible population","Set uptake over the horizon","Read annual & cumulative budget impact"]}
+  ];
+  const links=[
+    {n:"DHR — Dept. of Health Research",d:"Apex body for health research policy under MoHFW.",u:"https://dhr.gov.in"},
+    {n:"HTAIn — Health Technology Assessment in India",d:"National HTA programme: methods, India reference case & reports.",u:"https://htain.icmr.org.in"},
+    {n:"ICMR",d:"Indian Council of Medical Research — guidelines & ethics.",u:"https://www.icmr.gov.in"},
+    {n:"MoHFW",d:"Ministry of Health & Family Welfare — policies & programmes.",u:"https://mohfw.gov.in"},
+    {n:"NHSRC",d:"National Health Systems Resource Centre — costing studies & National Health Accounts.",u:"https://nhsrcindia.org"},
+    {n:"National Health Authority (PM-JAY)",d:"Ayushman Bharat package rates & health-benefit packages.",u:"https://nha.gov.in"},
+    {n:"WHO-CHOICE",d:"WHO cost-effectiveness analysis & unit-cost database.",u:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis/costing-and-technical-efficiency"},
+    {n:"CGHS rates",d:"Central Government Health Scheme reference tariffs.",u:"https://cghs.gov.in"},
+    {n:"ISPOR",d:"Global HEOR society — CHEERS 2022 & good-practice guidance.",u:"https://www.ispor.org"}
   ];
   document.getElementById("landing").innerHTML=`
     <div class="lhead">
@@ -268,6 +359,12 @@ function renderLanding(){
       <div class="badges"><span class="badge">Private compute engine</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">India reference case</span></div>
       <p style="margin-top:18px;color:#fff;font-size:14px"><b>Developed by Dr G Hari Prakash</b></p>
     </div>
+    <h2 class="sec">Useful resources &amp; official links</h2>
+    <p class="secsub">Authoritative sources for HTA methods, reference cases, costing data and package rates — useful when preparing an analysis.</p>
+    <div class="links">
+      ${links.map(l=>`<a class="lcard" href="${l.u}" target="_blank" rel="noopener noreferrer"><div class="ln">${l.n} <span class="ext">↗</span></div><div class="ld">${l.d}</div></a>`).join("")}
+    </div>
+
     <div style="text-align:center;margin-top:36px"><button class="btn btn-primary btn-lg" id="enterBottom">Enter the Workbench →</button></div>
     <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching<br><b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
   </div>`;
@@ -286,7 +383,8 @@ function renderCostingSidebar(){
   const c=state.costing,catOpts=cat=>COST_CATEGORIES.map(o=>`<option ${o===cat?"selected":""}>${o}</option>`).join("");
   const rows=c.rows.map((r,i)=>`<tr><td><input data-f="item" data-i="${i}" value="${r.item}"></td><td><select data-f="category" data-i="${i}">${catOpts(r.category)}</select></td><td><input data-f="quantity" data-i="${i}" type="number" value="${r.quantity}" style="text-align:right"></td><td><input data-f="unit_cost" data-i="${i}" type="number" value="${r.unit_cost}" style="text-align:right"></td><td><input data-f="year" data-i="${i}" type="number" value="${r.year}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">01</span> Costing</h2>
-    <p class="hint">Cost a programme from resource use (micro) or a total budget (gross). A diabetes-care example is loaded.</p>
+    <p class="hint">Cost a programme from resource use (micro) or a total budget (gross).</p>
+    ${exRow("costing")}
     <div class="seg" id="costMethod"><button data-v="micro" class="${c.method==="micro"?"active":""}">Micro-costing</button><button data-v="gross" class="${c.method==="gross"?"active":""}">Gross-costing</button></div>
     <div id="microC" style="display:${c.method==="micro"?"block":"none"}">
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
@@ -309,6 +407,7 @@ function renderCostingSidebar(){
   const tpl=document.getElementById("tplCost");if(tpl)tpl.onclick=()=>dlTemplate("costing");
   const cf=document.getElementById("csvFile");if(cf)cf.onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{c.rows=parseCSV(rd.result);renderCostingSidebar();renderCosting();};rd.readAsText(f);};
   document.getElementById("calcBtn").onclick=renderCosting;
+  wireExamples("costing");
 }
 async function renderCosting(){
   const c=state.costing,ws=document.getElementById("workspace");wsBusy("Costing");
@@ -334,6 +433,7 @@ function renderOopSidebar(){
   const rows=o.items.map((r,i)=>`<tr><td><input data-f="item" data-i="${i}" value="${r.item}"></td><td><select data-f="category" data-i="${i}">${catOpts(r.category)}</select></td><td><input data-f="amount" data-i="${i}" type="number" value="${r.amount}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">02</span> Out-of-Pocket</h2>
     <p class="hint">What the patient/household pays directly for one illness episode — and whether it is <b>catastrophic</b>.</p>
+    ${exRow("oop")}
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>₹ Amount</th><th></th></tr></thead><tbody id="oopRows">${rows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addOop">+ Add item</button><button class="btn btn-ghost sm" id="clearOop">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="oopFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplOop">Template</button></div>
     <div class="field"><label>Annual household income (₹)</label><input type="number" id="income" value="${o.income}"></div>
@@ -348,6 +448,7 @@ function renderOopSidebar(){
   document.getElementById("tplOop").onclick=()=>dlTemplate("oop");
   document.getElementById("oopFile").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{o.items=parseCSV(rd.result);renderOopSidebar();renderOop();};rd.readAsText(f);};
   document.getElementById("calcOop").onclick=renderOop;
+  wireExamples("oop");
 }
 async function renderOop(){
   const o=state.oop,ws=document.getElementById("workspace");wsBusy("Out-of-pocket");
@@ -375,6 +476,7 @@ function renderEvalSidebar(){
   const rows=e.strats.map((s,i)=>`<tr><td><input data-f="strategy" data-i="${i}" value="${s.strategy}"></td><td><input data-f="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-f="effect" data-i="${i}" type="number" step="0.01" value="${s.effect}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">03</span> Evaluation</h2>
     <p class="hint">Choose the type of economic evaluation — or let the advisor pick based on your data.</p>
+    ${exRow("evaluation")}
     <div class="sublabel">Analysis type</div>
     <div class="seg types" id="evalType">${typeBtns}</div>
     <div class="advisor"><label style="font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Not sure? What outcome do you have?</label>
@@ -398,6 +500,7 @@ function renderEvalSidebar(){
   document.getElementById("evalFile").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{e.strats=parseCSV(rd.result).map(r=>({strategy:r.strategy,cost:+r.cost,effect:+r.effect}));renderEvalSidebar();renderEval();};rd.readAsText(f);};
   const w=document.getElementById("wtp");if(w)w.oninput=()=>{e.wtp=+w.value;document.getElementById("wtpLab").textContent=compactINR(+w.value);};
   document.getElementById("analyseBtn").onclick=renderEval;
+  wireExamples("evaluation");
 }
 function reqCard(req,typeName){
   const items=req.items.map(i=>`<li><span class="${i.ok?"ok":"no"}">${i.ok?"✓":"✗"}</span><span>${i.label}${i.warn?` — <span style="color:var(--red)">${i.warn}</span>`:""}</span></li>`).join("");
@@ -457,6 +560,7 @@ function renderModelSidebar(){
   const matRows=as.matrix.map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name.slice(0,8)}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">04</span> Markov model</h2>
     <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
+    ${exRow("model")}
     <div class="sublabel">Health states (cost · utility · disability wt · dead?)</div>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost</th><th>Util</th><th>DW</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
@@ -489,6 +593,7 @@ function renderModelSidebar(){
   ["cycle","horizon","dCost","dEff"].forEach(k=>{const el=document.getElementById(k);el.onchange=()=>m[k]=+el.value;});
   const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
   document.getElementById("runModel").onclick=renderModel;
+  wireExamples("model");
 }
 async function renderModel(){
   const m=state.model,ws=document.getElementById("workspace");wsBusy("Markov model");
@@ -545,6 +650,7 @@ function renderBiaSidebar(){
   const b=state.bia,f=(id,l)=>`<div class="field"><label>${l}</label><input type="number" id="${id}" value="${b[id]}"></div>`;
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">06</span> Budget impact</h2>
     <p class="hint">Projects the payer's annual and cumulative spend as a new treatment is adopted over time.</p>
+    ${exRow("bia")}
     ${f("population","Catchment population")}
     <div class="field"><label>Eligible / prevalent share <span class="lab-val" id="eligLab">${pct(b.eligible)}</span></label><input type="range" id="eligible" min="0" max="0.5" step="0.005" value="${b.eligible}"></div>
     <div class="field"><label>Peak uptake of new tx <span class="lab-val" id="upLab">${pct(b.maxUptake)}</span></label><input type="range" id="maxUptake" min="0" max="1" step="0.05" value="${b.maxUptake}"></div>
@@ -555,6 +661,7 @@ function renderBiaSidebar(){
   const el=document.getElementById("eligible");el.oninput=()=>{b.eligible=+el.value;document.getElementById("eligLab").textContent=pct(b.eligible);};
   const up=document.getElementById("maxUptake");up.oninput=()=>{b.maxUptake=+up.value;document.getElementById("upLab").textContent=pct(b.maxUptake);};
   document.getElementById("runBia").onclick=renderBia;
+  wireExamples("bia");
 }
 async function renderBia(){
   const b=state.bia,ws=document.getElementById("workspace");wsBusy("Budget impact");
