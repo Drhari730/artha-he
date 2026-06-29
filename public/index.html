@@ -85,6 +85,9 @@ input[type=range]{width:100%;accent-color:var(--primary);height:5px;}
 .ex-btns button:hover{border-color:var(--primary);color:var(--primary);}
 .ex-btns button.active{background:var(--primary);color:#fff;border-color:var(--primary);}
 .ex-note{font-size:11.5px;color:var(--ink-soft);margin-top:9px;line-height:1.45;font-style:italic;}
+.wtp-chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.wtp-chips .wchip{font-family:var(--sans);font-size:11px;font-weight:600;color:var(--primary);background:var(--primary-soft);border:1px solid transparent;padding:5px 10px;border-radius:20px;cursor:pointer;transition:all .15s;}
+.wtp-chips .wchip:hover{background:var(--primary);color:#fff;}
 
 .grid-wrap{border:1.5px solid var(--line);border-radius:11px;overflow-x:auto;margin-bottom:12px;}
 table.data-grid{width:100%;border-collapse:collapse;font-size:11.5px;}
@@ -276,6 +279,7 @@ abbr.gl{border-bottom:1.5px dotted var(--primary);cursor:help;text-decoration:no
       <button data-mod="modeling">Modeling</button>
       <button data-mod="sensitivity">Sensitivity</button>
       <button data-mod="bia">Budget Impact</button>
+      <button data-mod="reference">Reference data</button>
       <button data-mod="methods">Methods</button>
     </nav>
     <div class="topbar-tools">

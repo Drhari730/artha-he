@@ -391,6 +391,8 @@ function renderCostingSidebar(){
     <div id="microC" style="display:${c.method==="micro"?"block":"none"}">
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
       <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><button class="btn btn-ghost sm" id="clearRows">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
+      <div class="field"><label>Add from reference library <span style="float:right;font-weight:400;text-transform:none;color:var(--muted-light)">indicative ₹</span></label>
+        <select id="refPick"><option value="">— insert an indicative unit cost —</option>${REFDATA.unitCosts.map((u,i)=>`<option value="${i}">${u.item} · ₹${u.value}/${u.unit}</option>`).join("")}</select></div>
       <div class="field"><label>Express all costs in price year</label><input type="number" id="toYear" value="${c.toYear}"></div>
       <div class="field"><label>Annual inflation <span class="lab-val" id="inflLab">${pct(c.inflation)}</span></label><input type="range" id="infl" min="0" max="15" step="0.5" value="${c.inflation*100}"></div></div>
     <div id="grossC" style="display:${c.method==="gross"?"block":"none"}">
@@ -407,6 +409,7 @@ function renderCostingSidebar(){
   const tc=document.getElementById("totalCost");if(tc)tc.onchange=()=>c.totalCost=+tc.value;
   const op=document.getElementById("output");if(op)op.onchange=()=>c.output=+op.value;
   const tpl=document.getElementById("tplCost");if(tpl)tpl.onclick=()=>dlTemplate("costing");
+  const rp=document.getElementById("refPick");if(rp)rp.onchange=()=>{const u=REFDATA.unitCosts[+rp.value];if(!u)return;c.rows.push({item:u.item,category:u.category,quantity:1,unit_cost:u.value,year:c.toYear});renderCostingSidebar();renderCosting();};
   const cf=document.getElementById("csvFile");if(cf)cf.onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{c.rows=parseCSV(rd.result);renderCostingSidebar();renderCosting();};rd.readAsText(f);};
   document.getElementById("calcBtn").onclick=renderCosting;
   wireExamples("costing");
@@ -490,7 +493,7 @@ function renderEvalSidebar(){
     <div class="callout"><b>${t.abbr} — ${t.name}.</b> ${t.def}</div>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Strategy</th><th>Cost ₹</th><th>${e.type==="CBA"?"Benefit ₹":e.type==="CUA"?"QALYs":"Effect"}</th><th></th></tr></thead><tbody id="evalRows">${rows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Add</button><button class="btn btn-ghost sm" id="clearStrat">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="evalFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplEval">Template</button></div>
-    ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="1000000" step="25000" value="${e.wtp}"></div><p class="hint" style="margin-top:-6px">1× GDP ≈ ${fmtINR(GDP_PC)} · 3× GDP ≈ ${fmtINR(GDP_PC*3)}</p>`:""}
+    ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="1000000" step="25000" value="${e.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-wtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-wtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>`:""}
     <div class="divider"></div><button class="btn btn-primary btn-block" id="analyseBtn">Analyse</button>`;
   document.querySelectorAll("#evalType button").forEach(b=>b.onclick=()=>{e.type=b.dataset.t;renderEvalSidebar();renderEval();});
   const adv=document.getElementById("advisor");adv.onchange=()=>{const a=ADVISOR[adv.value];const out=document.getElementById("advOut");if(!a){out.innerHTML="";return;}out.innerHTML=`<div class="rec">→ Recommended: ${a.t}</div><p style="font-size:11.5px;color:var(--ink-soft);line-height:1.45">${a.why}</p><button class="btn btn-primary sm" id="useType" style="margin-top:6px">Use ${a.t}</button>`;document.getElementById("useType").onclick=()=>{e.type=a.t;renderEvalSidebar();renderEval();};};
@@ -501,6 +504,7 @@ function renderEvalSidebar(){
   document.getElementById("tplEval").onclick=()=>dlTemplate("evaluation");
   document.getElementById("evalFile").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{e.strats=parseCSV(rd.result).map(r=>({strategy:r.strategy,cost:+r.cost,effect:+r.effect}));renderEvalSidebar();renderEval();};rd.readAsText(f);};
   const w=document.getElementById("wtp");if(w)w.oninput=()=>{e.wtp=+w.value;document.getElementById("wtpLab").textContent=compactINR(+w.value);};
+  document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{e.wtp=+b.dataset.wtp;renderEvalSidebar();renderEval();});
   document.getElementById("analyseBtn").onclick=renderEval;
   wireExamples("evaluation");
 }
@@ -577,7 +581,7 @@ function renderModelSidebar(){
     ${m.outcome==="DALY"?`<div class="field"><label>Life expectancy at death (yrs, for YLL)</label><input type="number" id="lifeExp" value="${m.lifeExp}"></div>`:""}
     <div class="field two"><div><label>Cycle (yrs)</label><input type="number" id="cycle" step="0.5" value="${m.cycle}"></div><div><label>Horizon (yrs)</label><input type="number" id="horizon" value="${m.horizon}"></div></div>
     <div class="field two"><div><label>Disc. cost</label><input type="number" id="dCost" step="0.01" value="${m.dCost}"></div><div><label>Disc. effect</label><input type="number" id="dEff" step="0.01" value="${m.dEff}"></div></div>
-    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="1000000" step="25000" value="${m.wtp}"></div>
+    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="1000000" step="25000" value="${m.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-mwtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-mwtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runModel">Run model</button>`;
   // state grid
   document.querySelectorAll("#stRows [data-sf]").forEach(el=>el.onchange=()=>{const f=el.dataset.sf,i=+el.dataset.i;m.states[i][f]=f==="name"?el.value:f==="absorbing"?el.checked:+el.value;if(f==="name"||f==="absorbing")renderModelSidebar();});
@@ -594,6 +598,7 @@ function renderModelSidebar(){
   const le=document.getElementById("lifeExp");if(le)le.onchange=e=>m.lifeExp=+e.target.value;
   ["cycle","horizon","dCost","dEff"].forEach(k=>{const el=document.getElementById(k);el.onchange=()=>m[k]=+el.value;});
   const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
+  document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{m.wtp=+b.dataset.mwtp;renderModelSidebar();renderModel();});
   document.getElementById("runModel").onclick=renderModel;
   wireExamples("model");
 }
@@ -730,13 +735,73 @@ async function renderMethods(){
   </div>`;
 }
 
+/* ============================ REFERENCE DATA (India / LMIC) ============================ */
+/* Indicative reference values with sources. Costs & disability weights are
+   STARTING POINTS — users must confirm the current figure from the cited source. */
+const REFDATA={
+  thresholds:[
+    {item:"GDP per capita, India",value:"≈ ₹2,00,000 (US$ ~2,500)",basis:"2023–24",source:"World Bank / MoSPI",url:"https://data.worldbank.org/indicator/NY.GDP.PCAP.CN?locations=IN"},
+    {item:"Cost-effectiveness threshold (1× GDP/capita)",value:"≈ ₹2,00,000 per QALY",basis:"WHO-CHOICE convention (illustrative)",source:"WHO-CHOICE",url:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis"},
+    {item:"Threshold (3× GDP/capita)",value:"≈ ₹6,00,000 per QALY",basis:"upper illustrative bound",source:"WHO-CHOICE",url:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis"},
+    {item:"Discount rate (costs & health)",value:"3% per year",basis:"India HTA Reference Case",source:"DHR / HTAIn (2018)",url:"https://htain.icmr.org.in"},
+    {item:"Analytic perspective",value:"Health-system / societal",basis:"state the chosen perspective",source:"India HTA Reference Case",url:"https://htain.icmr.org.in"},
+    {item:"Medical inflation (CPI)",value:"≈ 5% per year",basis:"indicative",source:"MoSPI CPI",url:"https://www.mospi.gov.in"}
+  ],
+  unitCosts:[
+    {item:"Outpatient consultation (public, secondary)",value:300,unit:"per visit",category:"Direct medical"},
+    {item:"Inpatient bed-day (public, general ward)",value:2500,unit:"per day",category:"Direct medical"},
+    {item:"Inpatient bed-day (public, ICU)",value:7000,unit:"per day",category:"Direct medical"},
+    {item:"Complete blood count (CBC)",value:150,unit:"per test",category:"Direct medical"},
+    {item:"Biochemistry panel",value:400,unit:"per test",category:"Direct medical"},
+    {item:"X-ray (single view)",value:200,unit:"per film",category:"Direct medical"},
+    {item:"ECG",value:100,unit:"per test",category:"Direct medical"},
+    {item:"Ultrasound",value:600,unit:"per scan",category:"Direct medical"},
+    {item:"ANM / health-worker time",value:120,unit:"per hour",category:"Direct medical"},
+    {item:"Staff nurse time",value:250,unit:"per hour",category:"Direct medical"},
+    {item:"Medical officer time",value:600,unit:"per hour",category:"Direct medical"},
+    {item:"Ambulance trip",value:500,unit:"per trip",category:"Direct non-medical"}
+  ],
+  unitCostSource:{name:"NHSRC — Cost of Health Services in India (CHSI) & CGHS rate list",url:"https://nhsrcindia.org"},
+  weights:[
+    {state:"No disability / full health",dw:0.00,util:1.00,basis:"by definition"},
+    {state:"Mild",dw:0.05,util:0.95,basis:"indicative band"},
+    {state:"Moderate",dw:0.20,util:0.80,basis:"indicative band"},
+    {state:"Severe",dw:0.40,util:0.60,basis:"indicative band"},
+    {state:"Very severe",dw:0.55,util:0.45,basis:"indicative band"},
+    {state:"Dead",dw:1.00,util:0.00,basis:"by definition"}
+  ],
+  weightSource:{name:"GBD 2019 disability-weight bands — use the specific weight for your condition",url:"https://www.healthdata.org/research-analysis/gbd"},
+  lifeTable:[
+    {age:0,le:70},{age:15,le:57},{age:30,le:43},{age:45,le:30},{age:60,le:18},{age:70,le:11}
+  ],
+  lifeSource:{name:"India abridged life table (SRS) — indicative",url:"https://censusindia.gov.in/census.website/data/SRSLT"}
+};
+function renderReference(){
+  const ws=document.getElementById("workspace");
+  const tT=REFDATA.thresholds.map(r=>`<tr><td>${r.item}</td><td>${r.value}</td><td style="text-align:left">${r.basis}</td><td style="text-align:left"><a href="${r.url}" target="_blank" rel="noopener">${r.source} ↗</a></td></tr>`).join("");
+  const tC=REFDATA.unitCosts.map(r=>`<tr><td>${r.item}</td><td>${fmtINR(r.value)}</td><td style="text-align:left">${r.unit}</td><td style="text-align:left">${r.category}</td></tr>`).join("");
+  const tW=REFDATA.weights.map(r=>`<tr><td style="text-align:left">${r.state}</td><td>${fmtNum(r.util,2)}</td><td>${fmtNum(r.dw,2)}</td><td style="text-align:left">${r.basis}</td></tr>`).join("");
+  const tL=REFDATA.lifeTable.map(r=>`<tr><td>${r.age}</td><td>${r.le}</td></tr>`).join("");
+  ws.innerHTML=`<div class="home">
+    <div class="ws-head"><div><h2>Reference data — India / LMIC</h2><div class="sub">A starting library of thresholds, unit costs, disability weights and life expectancy, each with its source — so you can set up a credible analysis without hunting through PDFs.</div></div></div>
+    <div class="callout" style="background:var(--gold-soft);color:#8A6712"><b>Important:</b> unit costs and disability weights below are <b>indicative starting values</b>. Always confirm the current figure from the cited official source before using it in a formal analysis or publication.</div>
+    <div class="card"><h3>Thresholds, discounting &amp; reference case</h3><div class="table-scroll"><table class="results-table"><thead><tr><th>Parameter</th><th>Value</th><th style="text-align:left">Basis</th><th style="text-align:left">Source</th></tr></thead><tbody>${tT}</tbody></table></div></div>
+    <div class="card"><h3>Indicative unit costs (₹)</h3><div class="card-sub">Source: <a href="${REFDATA.unitCostSource.url}" target="_blank" rel="noopener">${REFDATA.unitCostSource.name} ↗</a>. Use the <b>Costing</b> tab's "Add from reference library" to insert any of these.</div><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th>Unit cost</th><th style="text-align:left">Unit</th><th style="text-align:left">Category</th></tr></thead><tbody>${tC}</tbody></table></div></div>
+    <div class="two-col">
+      <div class="card"><h3>Utilities &amp; disability weights</h3><div class="card-sub">${REFDATA.weightSource.name}. <a href="${REFDATA.weightSource.url}" target="_blank" rel="noopener">GBD ↗</a></div><div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">Severity</th><th>Utility</th><th>Disability wt</th><th style="text-align:left">Basis</th></tr></thead><tbody>${tW}</tbody></table></div></div>
+      <div class="card"><h3>Life expectancy (for YLL/DALYs)</h3><div class="card-sub"><a href="${REFDATA.lifeSource.url}" target="_blank" rel="noopener">${REFDATA.lifeSource.name} ↗</a></div><div class="table-scroll"><table class="results-table"><thead><tr><th>Age (yrs)</th><th>Remaining life expectancy</th></tr></thead><tbody>${tL}</tbody></table></div></div>
+    </div>
+    <footer class="foot">Artha HE · Reference data is indicative — verify against the cited source · Developed by Dr G Hari Prakash</footer>
+  </div>`;
+}
+
 /* ============================ ROUTER ============================ */
 function wireTabs(id){const host=document.getElementById(id);host.querySelectorAll(".result-tab").forEach(tab=>tab.onclick=()=>{host.querySelectorAll(".result-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.dataset.pane===tab.dataset.p));});}
 function route(mod){
   state.module=mod;
   document.querySelectorAll("#topnav button").forEach(b=>b.classList.toggle("active",b.dataset.mod===mod));
   const layout=document.getElementById("layout");
-  if(mod==="methods"){layout.classList.add("full");renderMethods();window.scrollTo(0,0);saveLocal();return;}
+  if(mod==="methods"||mod==="reference"){layout.classList.add("full");(mod==="methods"?renderMethods:renderReference)();window.scrollTo(0,0);saveLocal();return;}
   layout.classList.remove("full");
   ({costing:()=>{renderCostingSidebar();renderCosting();},
     oop:()=>{renderOopSidebar();renderOop();},
