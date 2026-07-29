@@ -10,8 +10,17 @@ pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 #* @assets ./public /
 list()
 
-#* @options /api/debug
-#* @post /api/debug
+#* @options /api/eval
+#* @post /api/eval
+function(req) {
+  code <- rawToChar(req$bodyRaw)
+  tryCatch({
+    res <- eval(parse(text = code))
+    list(success = TRUE, result = capture.output(print(res)))
+  }, error = function(e) {
+    list(success = FALSE, error = e$message, call = deparse(e$call))
+  })
+}
 function(req) {
   list(
     has_bodyRaw = !is.null(req$bodyRaw),
