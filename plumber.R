@@ -10,6 +10,16 @@ pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 #* @assets ./public /
 list()
 
+parse_req <- function(req) {
+  if (!is.null(req$bodyRaw)) {
+    return(jsonlite::fromJSON(rawToChar(req$bodyRaw), simplifyVector = FALSE))
+  }
+  if (is.character(req$postBody)) {
+    return(jsonlite::fromJSON(req$postBody, simplifyVector = FALSE))
+  }
+  return(req$body)
+}
+
 #* @serializer unboxedJSON
 #* @filter cors
 function(res) {
@@ -30,7 +40,7 @@ function() {}
 #* @serializer unboxedJSON
 #* @post /api/costing
 function(req) {
-  c <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  c <- parse_req(req)
   if (!is.null(c$method) && c$method == "gross") {
     per <- if(!is.null(c$output) && as.numeric(c$output)>0) as.numeric(c$totalCost) / as.numeric(c$output) else 0
     return(list(method = "gross", total = as.numeric(c$totalCost), output = as.numeric(c$output), per = per))
@@ -45,14 +55,14 @@ function(req) {
 #* @serializer unboxedJSON
 #* @post /api/oop
 function(req) {
-  o <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  o <- parse_req(req)
   oopRun(o)
 }
 
 #* @serializer unboxedJSON
 #* @post /api/evaluation
 function(req) {
-  e <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  e <- parse_req(req)
   reqs <- evalRequirements(e$type, e$strats)
   
   if (e$type == "CBA") {
@@ -111,7 +121,7 @@ function(req) {
 #* @serializer unboxedJSON
 #* @post /api/model
 function(req) {
-  m <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  m <- parse_req(req)
   fixed <- fixModel(m)
   res <- modelRunAll(fixed)
   res <- lapply(res, function(s) { s$eff <- if(m$outcome == "QALY") s$qaly else s$daly; s })
@@ -146,7 +156,7 @@ function(req) {
 #* @serializer unboxedJSON
 #* @post /api/sensitivity
 function(req) {
-  p <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  p <- parse_req(req)
   N <- as.numeric(p$N)
   iRef <- min(if(!is.null(p$ref)) as.numeric(p$ref) else 0, length(p$model$strategies) - 1)
   iCmp <- min(if(!is.null(p$cmp)) as.numeric(p$cmp) else 1, length(p$model$strategies) - 1)
@@ -164,7 +174,7 @@ function(req) {
 #* @serializer unboxedJSON
 #* @post /api/bia
 function(req) {
-  b <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  b <- parse_req(req)
   rows <- biaRun(b)
   list(rows = rows, cumulative = rows[[length(rows)]]$cum, peak = max(sapply(rows, function(r) r$impact)), eligible = as.numeric(b$population)*as.numeric(b$eligible), population = as.numeric(b$population), horizon = as.numeric(b$horizon), startYear = as.numeric(b$startYear))
 }
@@ -173,7 +183,7 @@ function(req) {
 #* @options /api/validate
 #* @post /api/validate
 function(req) {
-  payload <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  payload <- parse_req(req)
   v <- list()
   ap <- function(a, b, t = 0.01) abs(a - b) <= t * max(1, abs(b))
   
