@@ -762,9 +762,9 @@ async function renderBia(){
 
 /* ============================ PERSISTENCE ============================ */
 function saveLocal(){try{localStorage.setItem("arthaHE_v1",JSON.stringify(state));}catch(e){}}
-function loadLocal(){try{const s=localStorage.getItem("arthaHE_v1");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});}}catch(e){}}
+function loadLocal(){try{const s=localStorage.getItem("arthaHE_v1");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
 function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
-function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
+function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
 
 /* ============================ GLOSSARY ============================ */
 const GLOSSARY={
