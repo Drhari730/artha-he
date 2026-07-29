@@ -1,10 +1,11 @@
 
 [phases.setup]
-nixPkgs = ["R", "gcc"]
-aptPkgs = ["libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsodium-dev"]
-
-[phases.install]
-cmds = ["Rscript install.R"]
+nixPkgs = [
+  "R",
+  "rPackages.plumber",
+  "rPackages.jsonlite",
+  "rPackages.dplyr"
+]
 
 [start]
 cmd = "Rscript run.R"
