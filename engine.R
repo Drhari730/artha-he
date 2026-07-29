@@ -50,7 +50,8 @@ microCost <- function(rows, ty, infl) {
   
   byCat <- lapply(COST_CATEGORIES, function(cat) {
     cat_lines <- Filter(function(l) !is.null(l$category) && l$category == cat, lines)
-    cost <- sum(sapply(cat_lines, function(l) l$line_cost))
+    if (length(cat_lines) == 0) return(NULL)
+    cost <- sum(sapply(cat_lines, function(l) as.numeric(l$line_cost)))
     if (cost > 0) {
       list(category = cat, cost = cost, share = ifelse(total > 0, cost / total, 0))
     } else {
@@ -226,8 +227,26 @@ fixModel <- function(m) {
       }
     }
     s$matrix <- M
+    
+    s$cost <- sapply(1:n, function(i) {
+      st <- m$states[[i]]
+      as.numeric(st$cost %||% 0) + (if(i==1) as.numeric(s$cost %||% 0) else 0)
+    })
+    s$util <- sapply(1:n, function(i) {
+      st <- m$states[[i]]
+      as.numeric(st$util %||% 0) + (if(i==1) as.numeric(s$util %||% 0) else 0)
+    })
+    s$daly <- sapply(1:n, function(i) {
+      st <- m$states[[i]]
+      as.numeric(st$daly %||% 0) + (if(i==1) as.numeric(s$daly %||% 0) else 0)
+    })
     s
   })
+  
+  for (i in 1:n) {
+    m$states[[i]]$dead <- as.logical(m$states[[i]]$dead %||% FALSE)
+  }
+  
   m
 }
 
