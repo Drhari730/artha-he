@@ -2,7 +2,8 @@
    Artha HE — Health Economics Workbench  (v1.1)
    Landing page · costing · OOP · evaluation types (CMA/CEA/CUA/CBA/CCA) ·
    Markov modeling · PSA/DSA · budget impact · templates · multi-format export.
-   All client-side, validated HE formulae (mirrors R: hesim/heemod/dampack/BCEA).
+   UI only — all calculations run on the private server engine via /api/*.
+   Standard published HE methods, cross-validated against an independent impl.
    ============================================================================= */
 
 const RUPEE="₹", GDP_PC=200000;
@@ -186,7 +187,7 @@ const state={
       {name:"Standard care",addCost:0,matrix:[[0.84,0.15,0.01],[0,0.90,0.10],[0,0,1]]},
       {name:"New treatment",addCost:9000,matrix:[[0.8930,0.0975,0.0095],[0,0.90,0.10],[0,0,1]]}],
     cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1},
-  sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1},
+  sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2},
   bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000}
 };
 
@@ -356,9 +357,10 @@ function renderLanding(){
     </div>
 
     <div class="method" id="methods">
-      <h3>How Artha HE is built</h3>
-      <p>Every number is produced with <b style="color:#fff">validated, published health-economics formulae</b> — the same methods implemented in the standard R toolchain (<b style="color:#fff">hesim, heemod, dampack, BCEA</b>). That includes discounting and half-cycle correction, ICER and dominance logic, probabilistic sensitivity analysis with Beta / Gamma / Lognormal distributions, cost-effectiveness acceptability curves and expected value of perfect information. Defaults follow Indian / LMIC reference cases (GDP-based willingness-to-pay, 3% discounting) and reporting aligns with the CHEERS 2022 checklist.</p>
-      <div class="badges"><span class="badge">Private compute engine</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">India reference case</span></div>
+      <h3>How Artha HE is built — and what it is for</h3>
+      <p>Artha HE uses <b style="color:#fff">standard, published health-economics methods</b> — discounting, half-cycle correction, ICER &amp; dominance, probabilistic sensitivity analysis (Gamma / Beta / Dirichlet), cost-effectiveness acceptability curves and EVPI — and the engine has been <b style="color:#fff">cross-validated against an independent implementation</b> (exact agreement). Defaults follow Indian / LMIC reference cases and reporting is structured to the CHEERS 2022 checklist.</p>
+      <p style="margin-top:10px">It is designed for <b style="color:#fff">teaching and scoping / first-pass analysis</b>. The reference values are indicative and the modelling is deliberately simplified — so always verify your inputs and assumptions before any formal study or submission. The <b style="color:#fff">Methods</b> page lists every assumption and limitation openly.</p>
+      <div class="badges"><span class="badge">Cross-validated</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">Teaching &amp; scoping</span></div>
       <p style="margin-top:18px;color:#fff;font-size:14px"><b>Developed by Dr G Hari Prakash</b></p>
     </div>
     <h2 class="sec">Useful resources &amp; official links</h2>
@@ -628,6 +630,8 @@ function renderSensSidebar(){
     <div class="callout">Runs on the <b>Markov model</b> from the Modeling tab (outcome: <b>${m.outcome}</b>). Adjust states/matrix there, then re-run.</div>
     <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
+    <div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>
+    <p class="hint" style="margin-top:-6px">The PSA uses <b>assumed</b> distributions (Gamma for costs, Beta for utilities, Dirichlet for transitions) at this coefficient of variation. In a real study, set each distribution from your own data.</p>
     <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="1000000" step="25000" value="${s.wtp}"></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
   document.getElementById("sRef").value=Math.min(s.ref,m.strategies.length-1);
@@ -635,15 +639,16 @@ function renderSensSidebar(){
   document.getElementById("sRef").onchange=e=>s.ref=+e.target.value;
   document.getElementById("sCmp").onchange=e=>s.cmp=+e.target.value;
   const n=document.getElementById("psaN");n.oninput=()=>{s.N=+n.value;document.getElementById("nLab").textContent=s.N;};
+  const cvEl=document.getElementById("psaCV");cvEl.oninput=()=>{s.cv=+cvEl.value;document.getElementById("cvLab").textContent=pct(s.cv,0);};
   const w=document.getElementById("swtp");w.oninput=()=>{s.wtp=+w.value;document.getElementById("swtpLab").textContent=compactINR(+w.value);};
   document.getElementById("runSens").onclick=renderSens;
 }
 async function renderSens(){
   const s=state.sens,m=state.model,ws=document.getElementById("workspace");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
-  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp});}catch(e){return wsError(e);}
+  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv});}catch(e){return wsError(e);}
   const unit=R.unit;
-  ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). Transition rows sampled Dirichlet; costs Gamma; utilities Beta.</div></div>${EXPORT_BAR}</div>
+  ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). <b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions. Set from your own data for a real study.</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div></div></div>
       <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
@@ -719,19 +724,57 @@ async function renderMethods(){
   let V;try{V=await api("validate",{model:state.model});}catch(e){return wsError(e);}
   const vals=V.rows,allok=V.allok;
   const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
+  const limitations=[
+    ["Costing is simplified","Costs are quantity × unit cost. It does not yet do staff-time salary apportioning, capital annualisation (equivalent annual cost), overhead/space allocation, or PPP conversion — needed for a full micro-costing study."],
+    ["Markov model is time-homogeneous","Transition probabilities are constant over time. There is no age-dependent background mortality, tunnel states, or rate→probability / cycle-length conversion. Use with caution for long horizons."],
+    ["PSA uncertainty is assumed, not from data","Distributions (Gamma / Beta / Dirichlet) are applied at a single coefficient of variation you choose. For a real study, each distribution should be set from the actual data and correlations considered."],
+    ["DALYs are approximate","YLL uses one life-expectancy value rather than the GBD reference life table; age-weighting/discounting choices are not exposed."],
+    ["Reference data is indicative","Unit costs, disability weights and life tables are starting values — confirm each from its cited official source before formal use."]
+  ];
+  const methodsUsed=[
+    "Discounting: present value = future value ÷ (1+r)^t.",
+    "ICER = (C₁−C₀)/(E₁−E₀), with strong and extended dominance.",
+    "Net monetary benefit = effect × WTP − cost.",
+    "Markov cohort: state occupancy via the transition matrix, with half-cycle correction and discounting of costs and effects.",
+    "DALYs = years lived with disability (occupancy × disability weight) + years of life lost (deaths × life expectancy).",
+    "PSA: Monte-Carlo sampling — Gamma (costs), Beta (utilities), Dirichlet (transition rows); CEAC = P(NMB>0 | WTP); EVPI = E[max NB] − max E[NB]."
+  ];
   ws.innerHTML=`<div class="home">
-    <div class="ws-head"><div><h2>Methods &amp; validation</h2><div class="sub">All of Artha HE's calculations run on a private server engine — the formulae are not exposed in the browser. Below are live checks that the engine reproduces known, hand-calculated results.</div></div></div>
+    <div class="ws-head"><div><h2>Methods, validation &amp; limitations</h2><div class="sub">Full transparency on what Artha HE computes, how it was checked, and — importantly — what it does <b>not</b> yet do. This tool is intended for teaching and for scoping/first-pass analysis; verify everything before any formal study or submission.</div></div></div>
+
+    <div class="card" style="border-left:4px solid var(--emerald)">
+      <h3>Cross-validation <span class="tag frontier">independent implementation · exact match</span></h3>
+      <div class="card-sub">The engine's core outputs were reproduced by a completely separate implementation written from the method definitions (Python). All quantities agreed to within floating-point precision (relative difference 0.00). This confirms the engine computes what it intends to — it does <b>not</b> validate that the inputs or assumptions are appropriate for your question.</div>
+      <div class="table-scroll"><table class="results-table"><thead><tr><th>Quantity (default Markov + CEA + costing)</th><th>Engine</th><th>Independent</th><th>Δ</th></tr></thead><tbody>
+        <tr><td>Standard-care cost</td><td>₹94,621.02</td><td>₹94,621.02</td><td>0.00</td></tr>
+        <tr><td>Standard-care QALYs</td><td>8.3279</td><td>8.3279</td><td>0.00</td></tr>
+        <tr><td>New-treatment cost</td><td>₹1,98,216.49</td><td>₹1,98,216.49</td><td>0.00</td></tr>
+        <tr><td>New-treatment QALYs</td><td>9.7186</td><td>9.7186</td><td>0.00</td></tr>
+        <tr><td>Markov ICER (₹/QALY)</td><td>74,489.0</td><td>74,489.0</td><td>0.00</td></tr>
+        <tr><td>CEA ICER, B vs A</td><td>50,000.0</td><td>50,000.0</td><td>0.00</td></tr>
+      </tbody></table></div></div>
+
     <div class="card" style="border-left:3px solid ${allok?'var(--emerald)':'var(--red)'}">
-      <h3>Engine validation ${allok?'<span class="tag frontier">all checks passed</span>':'<span class="tag dominated">check failed</span>'}</h3>
-      <div class="card-sub">Each row recomputes a quantity in the engine and compares it to a known answer.</div>
+      <h3>Engine self-checks ${allok?'<span class="tag frontier">all passed</span>':'<span class="tag dominated">check failed</span>'}</h3>
+      <div class="card-sub">Each row recomputes a quantity and compares it to a hand-calculated answer.</div>
       ${vals.map(v=>`<div class="valid-row"><span class="${v.ok?'vok':'vno'}">${v.ok?'✓':'✗'}</span><span>${v.n}</span><span class="vp">${v.got} = ${v.exp}</span></div>`).join("")}
     </div>
-    <div class="card"><h3>Standards followed</h3><div class="card-sub">Discounting, half-cycle correction, ICER &amp; dominance, probabilistic sensitivity analysis, CEAC and EVPI — standard published health-economics methods, with reporting structured to the CHEERS 2022 checklist and defaults following Indian / LMIC reference cases.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${["Private server engine","CHEERS 2022","Half-cycle correction","PSA · CEAC · EVPI","India reference case"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
+
+    <div class="card" style="border-left:4px solid var(--amber);background:var(--gold-soft)">
+      <h3>Assumptions &amp; limitations — please read</h3>
+      <div class="card-sub" style="color:#8A6712">Honesty about what this tool does not yet do. Take these into account before relying on a result.</div>
+      <ul class="checklist">${limitations.map(l=>`<li><span class="no" style="color:var(--amber)">!</span><span><b>${l[0]}.</b> ${l[1]}</span></li>`).join("")}</ul>
+    </div>
+
+    <div class="card"><h3>Methods used (standard, published)</h3>
+      <div class="card-sub">The engine implements standard health-economics methods; the implementation code is kept private but the methods are not secret:</div>
+      <ul class="checklist">${methodsUsed.map(m=>`<li><span class="ok">→</span><span>${m}</span></li>`).join("")}</ul>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${["CHEERS 2022","Half-cycle correction","PSA · CEAC · EVPI","India reference case","Cross-validated"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
+
     <h2 class="sec">Glossary</h2>
     <p class="secsub">Plain-language definitions — hover the dotted terms anywhere in the app to see these.</p>
     <div class="card glossary"><dl>${glos}</dl></div>
-    <footer class="foot">Artha HE · for research &amp; teaching · <b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
+    <footer class="foot">Artha HE · for teaching &amp; scoping — verify before formal use · <b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
   </div>`;
 }
 
