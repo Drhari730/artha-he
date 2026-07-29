@@ -1,0 +1,12 @@
+[providers]
+exclude = ["node"]
+
+[phases.setup]
+nixPkgs = ["R", "gcc"]
+aptPkgs = ["libcurl4-openssl-dev", "libssl-dev", "libxml2-dev", "libsodium-dev"]
+
+[phases.install]
+cmds = ["Rscript install.R"]
+
+[start]
+cmd = "Rscript run.R"
