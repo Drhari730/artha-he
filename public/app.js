@@ -389,9 +389,9 @@ function backToLanding(){document.getElementById("appShell").style.display="none
 
 /* ============================ COSTING ============================ */
 const ADV_COLS={
-  staff:[{f:"role",t:"text",h:"Role"},{f:"salary",t:"number",h:"₹/mo"},{f:"hours",t:"number",h:"Hrs"},{f:"sessions",t:"number",h:"Sess"}],
-  equip:[{f:"item",t:"text",h:"Item"},{f:"price",t:"number",h:"Price ₹"},{f:"life",t:"number",h:"Life yr"},{f:"maintPct",t:"number",h:"Maint"},{f:"usagePct",t:"number",h:"Use"},{f:"qty",t:"number",h:"Qty"}],
-  consum:[{f:"item",t:"text",h:"Item"},{f:"qty",t:"number",h:"Qty"},{f:"unit",t:"number",h:"Unit ₹"}],
+  staff:[{f:"role",t:"text",h:"Role"},{f:"salary",t:"number",h:"₹ / Month"},{f:"hours",t:"number",h:"Hours"},{f:"sessions",t:"number",h:"Sessions"}],
+  equip:[{f:"item",t:"text",h:"Item"},{f:"price",t:"number",h:"Price ₹"},{f:"life",t:"number",h:"Life (years)"},{f:"maintPct",t:"number",h:"Maintenance"},{f:"usagePct",t:"number",h:"Usage"},{f:"qty",t:"number",h:"Quantity"}],
+  consum:[{f:"item",t:"text",h:"Item"},{f:"qty",t:"number",h:"Quantity"},{f:"unit",t:"number",h:"Unit Cost ₹"}],
   space:[{f:"item",t:"text",h:"Item"},{f:"annual",t:"number",h:"Annual ₹"}]
 };
 const ADV_NEW={staff:{role:"New role",salary:0,hours:1,sessions:1},equip:{item:"New item",price:0,life:5,maintPct:0.05,usagePct:1,qty:1},consum:{item:"New item",qty:1,unit:0},space:{item:"New space",annual:0}};
@@ -620,13 +620,13 @@ function renderModelSidebar(){
   const stRows=m.states.map((s,i)=>`<tr><td><input data-sf="name" data-i="${i}" value="${s.name}"></td><td><input data-sf="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-sf="util" data-i="${i}" type="number" step="0.01" value="${s.util}" style="text-align:right"></td><td><input data-sf="dw" data-i="${i}" type="number" step="0.01" value="${s.dw}" style="text-align:right"></td><td style="text-align:center"><input data-sf="absorbing" data-i="${i}" type="checkbox" ${s.absorbing?"checked":""}></td><td class="row-del" data-sdel="${i}">&times;</td></tr>`).join("");
   const strBtns=m.strategies.map((s,i)=>`<button data-strat="${i}" class="${m.activeStrat===i?"active":""}">${s.name}</button>`).join("");
   const as=m.strategies[m.activeStrat];
-  const head=m.states.map(s=>`<th>${s.name.slice(0,4)}</th>`).join("");
-  const matRows=as.matrix.map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name.slice(0,8)}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
+  const head=m.states.map(s=>`<th>${s.name}</th>`).join("");
+  const matRows=as.matrix.map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">04</span> Markov model</h2>
     <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
     ${exRow("model")}
-    <div class="sublabel">Health states (cost · utility · disability wt · dead?)</div>
-    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost</th><th>Util</th><th>DW</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
+    <div class="sublabel">Health states (cost · utility · disability weight · dead?)</div>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost</th><th>Utility</th><th>Disability wt</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
     <div class="sublabel">Strategies &amp; transition matrix</div>
     <div class="seg types" id="stratSel">${strBtns}</div>
