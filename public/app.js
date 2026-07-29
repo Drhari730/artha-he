@@ -191,7 +191,7 @@ const state={
     strategies:[
       {name:"Standard care",addCost:0,matrix:[[0.84,0.15,0.01],[0,0.90,0.10],[0,0,1]]},
       {name:"New treatment",addCost:9000,matrix:[[0.8930,0.0975,0.0095],[0,0.90,0.10],[0,0,1]]}],
-    cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1},
+    cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1,startAge:30,bgMortality:false},
   sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2},
   bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000}
 };
@@ -639,7 +639,16 @@ function renderModelSidebar(){
     ${m.outcome==="DALY"?`<div class="field"><label>Life expectancy at death (yrs, for YLL)</label><input type="number" id="lifeExp" value="${m.lifeExp}"></div>`:""}
     <div class="field two"><div><label>Cycle (yrs)</label><input type="number" id="cycle" step="0.5" value="${m.cycle}"></div><div><label>Horizon (yrs)</label><input type="number" id="horizon" value="${m.horizon}"></div></div>
     <div class="field two"><div><label>Disc. cost</label><input type="number" id="dCost" step="0.01" value="${m.dCost}"></div><div><label>Disc. effect</label><input type="number" id="dEff" step="0.01" value="${m.dEff}"></div></div>
+    <div class="sublabel">Age &amp; background mortality (time-dependent)</div>
+    <div class="field two"><div><label>Cohort start age</label><input type="number" id="startAge" value="${m.startAge}"></div><div><label style="text-transform:none;letter-spacing:0"><input type="checkbox" id="bgMort" ${m.bgMortality?"checked":""} style="width:auto;vertical-align:-2px;margin-right:6px">Add age-specific background mortality</label></div></div>
+    ${m.bgMortality?`<p class="hint" style="margin-top:-6px">Illustrative age-specific all-cause mortality is applied on top of your disease transitions (so your matrix should hold <b>disease-specific</b> transitions only). Replace with your setting's life table for formal use.</p>`:""}
     <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="1000000" step="25000" value="${m.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-mwtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-mwtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>
+    <div class="sublabel">Rate ⇄ probability helper</div>
+    <div class="ex-row" style="border-style:solid">
+      <div class="field two"><div><label>Value</label><input type="number" id="cvVal" step="0.01" value="0.1"></div><div><label>is a…</label><select id="cvKind"><option value="rate">rate / year</option><option value="prob">probability</option></select></div></div>
+      <div class="field two"><div><label>over (yrs)</label><input type="number" id="cvT" step="0.5" value="1"></div><div><label>→ cycle (yrs)</label><input type="number" id="cvCyc" step="0.5" value="${m.cycle}"></div></div>
+      <div class="ex-note" id="cvOut" style="font-style:normal"></div>
+    </div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runModel">Run model</button>`;
   // state grid
   document.querySelectorAll("#stRows [data-sf]").forEach(el=>el.onchange=()=>{const f=el.dataset.sf,i=+el.dataset.i;m.states[i][f]=f==="name"?el.value:f==="absorbing"?el.checked:+el.value;if(f==="name"||f==="absorbing")renderModelSidebar();});
@@ -654,7 +663,13 @@ function renderModelSidebar(){
   document.getElementById("delStrat").onclick=()=>{if(m.strategies.length<=2)return;m.strategies.splice(m.activeStrat,1);m.activeStrat=0;renderModelSidebar();};
   document.querySelectorAll("#outcomeSel button").forEach(b=>b.onclick=()=>{m.outcome=b.dataset.o;renderModelSidebar();renderModel();});
   const le=document.getElementById("lifeExp");if(le)le.onchange=e=>m.lifeExp=+e.target.value;
-  ["cycle","horizon","dCost","dEff"].forEach(k=>{const el=document.getElementById(k);el.onchange=()=>m[k]=+el.value;});
+  ["cycle","horizon","dCost","dEff","startAge"].forEach(k=>{const el=document.getElementById(k);if(el)el.onchange=()=>m[k]=+el.value;});
+  const bg=document.getElementById("bgMort");if(bg)bg.onchange=()=>{m.bgMortality=bg.checked;renderModelSidebar();renderModel();};
+  const convCalc=()=>{const val=+document.getElementById("cvVal").value,kind=document.getElementById("cvKind").value,tt=+document.getElementById("cvT").value||1,cyc=+document.getElementById("cvCyc").value||1;
+    let rate; if(kind==="rate")rate=val; else rate=(val>=1)?1e9:-Math.log(1-val)/tt;
+    const pCyc=1-Math.exp(-rate*cyc), pAnn=1-Math.exp(-rate*1);
+    document.getElementById("cvOut").innerHTML=`Per-cycle (${cyc} yr) probability = <b style="color:var(--primary)">${pCyc.toFixed(4)}</b> · annual rate ${rate>1e8?"∞":rate.toFixed(4)} · annual prob ${pAnn.toFixed(4)}`;};
+  ["cvVal","cvKind","cvT","cvCyc"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=convCalc;});convCalc();
   const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
   document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{m.wtp=+b.dataset.mwtp;renderModelSidebar();renderModel();});
   document.getElementById("runModel").onclick=renderModel;
@@ -667,7 +682,7 @@ async function renderModel(){
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
   const incRows=inc.map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
   const pts=R.plane,series=R.series;
-  ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, half-cycle correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.</div></div>${EXPORT_BAR}</div>
+  ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, half-cycle correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.${m.bgMortality?` <b>Age-specific background mortality on</b> (from age ${m.startAge}).`:""}</div></div>${EXPORT_BAR}</div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">Optimal at WTP</div><div class="k-val sm">${best.name}</div><div class="k-sub">at ${compactINR(m.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">Its ICER</div><div class="k-val mono">${best.icer==null?"ref":fmtINR(best.icer)}</div><div class="k-sub">per ${unit}</div></div><div class="kpi emerald"><div class="k-label">Strategies</div><div class="k-val mono">${m.strategies.length}</div><div class="k-sub">${R.onFr} on frontier</div></div></div>
     <div class="result-tabs" id="mTabs"><button class="result-tab active" data-p="trace">Cohort trace</button><button class="result-tab" data-p="ce">CE plane</button><button class="result-tab" data-p="inc">Incremental</button></div>
     <div class="pane active" data-pane="trace"><div class="card flush"><div class="pad"><h3>Cohort trace — ${R.activeName}</h3><div class="card-sub">Share of the cohort in each state over time (switch strategy in the sidebar).</div>${lineChart(series,"Years",m.horizon)}</div><div class="legend">${m.states.map((s,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${s.name}</div>`).join("")}</div></div></div>
@@ -782,7 +797,7 @@ async function renderMethods(){
   const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
   const limitations=[
     ["Costing is simplified","Costs are quantity × unit cost. It does not yet do staff-time salary apportioning, capital annualisation (equivalent annual cost), overhead/space allocation, or PPP conversion — needed for a full micro-costing study."],
-    ["Markov model is time-homogeneous","Transition probabilities are constant over time. There is no age-dependent background mortality, tunnel states, or rate→probability / cycle-length conversion. Use with caution for long horizons."],
+    ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles (though optional age-specific background mortality and a rate→probability / cycle-length helper are now provided). Tunnel states and fully time-varying disease transitions are not yet supported — use care for long horizons."],
     ["PSA uncertainty is assumed, not from data","Distributions (Gamma / Beta / Dirichlet) are applied at a single coefficient of variation you choose. For a real study, each distribution should be set from the actual data and correlations considered."],
     ["DALYs are approximate","YLL uses one life-expectancy value rather than the GBD reference life table; age-weighting/discounting choices are not exposed."],
     ["Reference data is indicative","Unit costs, disability weights and life tables are starting values — confirm each from its cited official source before formal use."]

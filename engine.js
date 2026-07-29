@@ -118,10 +118,26 @@ function evalRequirements(type, strats) {
 
 /* ---------- configurable Markov ---------- */
 function fixModel(m) { const n = m.states.length; m.strategies.forEach(s => { const M = []; for (let i = 0; i < n; i++) { const row = []; for (let j = 0; j < n; j++) { const v = s.matrix && s.matrix[i] && s.matrix[i][j] != null ? +s.matrix[i][j] : (i === j ? 1 : 0); row.push(v); } M.push(row); } s.matrix = M; }); }
+// Illustrative age-specific all-cause annual mortality probability (qx),
+// pattern-based — NOT an official life table. Replace with your setting's data.
+const BG_MORT = [[0,0.028],[1,0.003],[5,0.001],[15,0.0015],[25,0.002],[35,0.003],[45,0.006],[55,0.013],[65,0.030],[75,0.070],[85,0.15]];
+function bgMortAnnual(age) { let q = BG_MORT[0][1]; for (const [a, v] of BG_MORT) { if (age >= a) q = v; } return q; }
 function markovGeneric(m, strat) {
   const n = m.states.length, P = strat.matrix, nC = Math.round(m.horizon / m.cycle);
+  const deadIdxFirst = m.states.findIndex(s => s.absorbing);
+  const useBg = !!m.bgMortality && deadIdxFirst >= 0;
+  const startAge = (+m.startAge > 0) ? +m.startAge : 30;
   let trace = [m.states.map((s, i) => i === 0 ? 1 : 0)];
-  for (let t = 0; t < nC; t++) { const cur = trace[t], nx = new Array(n).fill(0); for (let i = 0; i < n; i++) { const row = P[i] || []; for (let j = 0; j < n; j++) nx[j] += cur[i] * (+row[j] || 0); } trace.push(nx); }
+  for (let t = 0; t < nC; t++) {
+    const cur = trace[t], nx = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) { const row = P[i] || []; for (let j = 0; j < n; j++) nx[j] += cur[i] * (+row[j] || 0); }
+    if (useBg) { // age-dependent background mortality applied on top of disease transitions
+      const age = startAge + t * m.cycle;
+      const pCycle = 1 - Math.pow(1 - bgMortAnnual(age), m.cycle); // cycle-length adjusted
+      for (let j = 0; j < n; j++) { if (!m.states[j].absorbing) { const mv = nx[j] * pCycle; nx[j] -= mv; nx[deadIdxFirst] += mv; } }
+    }
+    trace.push(nx);
+  }
   let Cc = 0, Q = 0, YLD = 0;
   for (let t = 0; t < nC; t++) { const occ = trace[t].map((v, i) => (v + trace[t + 1][i]) / 2), dc = Math.pow(1 + m.dCost, t * m.cycle), de = Math.pow(1 + m.dEff, t * m.cycle); for (let i = 0; i < n; i++) { const st = m.states[i], cc = (+st.cost) + (st.absorbing ? 0 : (+strat.addCost || 0)); Cc += occ[i] * cc * m.cycle / dc; Q += occ[i] * (+st.util) * m.cycle / de; YLD += occ[i] * (+st.dw || 0) * m.cycle / de; } }
   const deadIdx = m.states.map((s, i) => s.absorbing ? i : -1).filter(i => i >= 0); let YLL = 0;
