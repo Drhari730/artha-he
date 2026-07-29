@@ -10,6 +10,18 @@ pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 #* @assets ./public /
 list()
 
+#* @options /api/debug
+#* @post /api/debug
+function(req) {
+  list(
+    has_bodyRaw = !is.null(req$bodyRaw),
+    is_char_postBody = is.character(req$postBody),
+    typeof_postBody = typeof(req$postBody),
+    typeof_body = typeof(req$body),
+    test = "v2"
+  )
+}
+
 parse_req <- function(req) {
   if (!is.null(req$bodyRaw)) {
     return(jsonlite::fromJSON(rawToChar(req$bodyRaw), simplifyVector = FALSE))
