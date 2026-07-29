@@ -692,34 +692,88 @@ async function renderModel(){
 }
 
 /* ============================ SENSITIVITY ============================ */
+function syncSensParams(m, s) {
+  if (!s.mode) s.mode = "global";
+  if (!s.params) s.params = { states: [], strategies: [] };
+  const p = s.params, cv = s.cv || 0.2, uSE = Math.min(0.08, 0.4 * cv);
+  while (p.states.length < m.states.length) p.states.push({});
+  m.states.forEach((st, i) => {
+    let pst = p.states[i];
+    if (st.cost > 0 && !pst.cost) pst.cost = { dist: "gamma", mean: +st.cost, se: +st.cost * cv };
+    if (st.util > 0 && st.util < 1 && !pst.util) pst.util = { dist: "beta", mean: +st.util, se: uSE };
+  });
+  while (p.strategies.length < m.strategies.length) p.strategies.push({});
+  m.strategies.forEach((st, i) => {
+    let pst = p.strategies[i];
+    if (st.addCost > 0 && !pst.addCost) pst.addCost = { dist: "gamma", mean: +st.addCost, se: +st.addCost * cv };
+    if (!pst.matrix) pst.matrix = st.matrix.map(() => ({ dist: "dirichlet", K: Math.max(4, 1/(cv*cv)) }));
+  });
+}
+
 function renderSensSidebar(){
-  const s=state.sens,m=state.model;
+  const s=state.sens, m=state.model;
   if(s.ref==null)s.ref=0; if(s.cmp==null)s.cmp=1;
+  syncSensParams(m, s);
+  
   const opts=m.strategies.map((st,i)=>`<option value="${i}">${st.name}</option>`).join("");
+  
+  let gridHtml = "";
+  if (s.mode === "per_parameter") {
+    let rows = "";
+    const distSel = (pkey, v, opts) => `<select data-pkey="${pkey}" data-field="dist" style="width:75px">${opts.map(o=>`<option value="${o}" ${v===o?"selected":""}>${o}</option>`).join("")}</select>`;
+    m.states.forEach((st, i) => {
+      const pst = s.params.states[i];
+      if (pst.cost) rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} cost</span></td><td>${distSel(`states|${i}|cost`, pst.cost.dist, ["gamma","normal","fixed"])}</td><td><input type="number" data-pkey="states|${i}|cost" data-field="mean" value="${pst.cost.mean}"></td><td><input type="number" data-pkey="states|${i}|cost" data-field="se" value="${pst.cost.se||0}"></td></tr>`;
+      if (pst.util) rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} util</span></td><td>${distSel(`states|${i}|util`, pst.util.dist, ["beta","normal","fixed"])}</td><td><input type="number" data-pkey="states|${i}|util" data-field="mean" value="${pst.util.mean}" step="0.01"></td><td><input type="number" data-pkey="states|${i}|util" data-field="se" value="${pst.util.se||0}" step="0.01"></td></tr>`;
+    });
+    m.strategies.forEach((st, i) => {
+      const pst = s.params.strategies[i];
+      if (pst.addCost) rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} added</span></td><td>${distSel(`strategies|${i}|addCost`, pst.addCost.dist, ["gamma","normal","fixed"])}</td><td><input type="number" data-pkey="strategies|${i}|addCost" data-field="mean" value="${pst.addCost.mean}"></td><td><input type="number" data-pkey="strategies|${i}|addCost" data-field="se" value="${pst.addCost.se||0}"></td></tr>`;
+      pst.matrix.forEach((mr, rIdx) => {
+        rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} Tr(from ${m.states[rIdx].name.slice(0,4)})</span></td><td>${distSel(`strategies|${i}|matrix|${rIdx}`, mr.dist, ["dirichlet","fixed"])}</td><td>Sum <i>N</i>:</td><td><input type="number" data-pkey="strategies|${i}|matrix|${rIdx}" data-field="K" value="${mr.K||100}"></td></tr>`;
+      });
+    });
+    gridHtml = `<div class="sublabel" style="margin-top:12px;margin-bottom:4px">Per-parameter distributions</div><div class="grid-wrap" style="max-height:220px;overflow-y:auto;margin-bottom:12px"><table class="data-grid" style="table-layout:fixed"><thead><tr><th style="width:40%">Param</th><th style="width:25%">Dist</th><th style="width:20%">Mean</th><th style="width:15%">SE / N</th></tr></thead><tbody id="paramRows">${rows}</tbody></table></div>`;
+  }
+
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">05</span> Sensitivity</h2>
     <p class="hint">How robust is the model's conclusion to uncertainty — deterministic (tornado) and probabilistic (PSA → CEAC, EVPI).</p>
-    <div class="callout">Runs on the <b>Markov model</b> from the Modeling tab (outcome: <b>${m.outcome}</b>). Adjust states/matrix there, then re-run.</div>
     <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
+    <div class="field"><label>Distribution mode</label><select id="sMode"><option value="global" ${s.mode==="global"?"selected":""}>Global CV (Simple)</option><option value="per_parameter" ${s.mode==="per_parameter"?"selected":""}>Per-Parameter (Advanced)</option></select></div>
+    ${s.mode === "global" ? `<div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>` : gridHtml}
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
-    <div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>
-    <p class="hint" style="margin-top:-6px">The PSA uses <b>assumed</b> distributions (Gamma for costs, Beta for utilities, Dirichlet for transitions) at this coefficient of variation. In a real study, set each distribution from your own data.</p>
     <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="1000000" step="25000" value="${s.wtp}"></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
+
   document.getElementById("sRef").value=Math.min(s.ref,m.strategies.length-1);
   document.getElementById("sCmp").value=Math.min(s.cmp,m.strategies.length-1);
   document.getElementById("sRef").onchange=e=>s.ref=+e.target.value;
   document.getElementById("sCmp").onchange=e=>s.cmp=+e.target.value;
+  document.getElementById("sMode").onchange=e=>{s.mode=e.target.value;renderSensSidebar();};
+  
   const n=document.getElementById("psaN");n.oninput=()=>{s.N=+n.value;document.getElementById("nLab").textContent=s.N;};
-  const cvEl=document.getElementById("psaCV");cvEl.oninput=()=>{s.cv=+cvEl.value;document.getElementById("cvLab").textContent=pct(s.cv,0);};
   const w=document.getElementById("swtp");w.oninput=()=>{s.wtp=+w.value;document.getElementById("swtpLab").textContent=compactINR(+w.value);};
+  
+  if (s.mode === "global") {
+    const cvEl=document.getElementById("psaCV");cvEl.oninput=()=>{s.cv=+cvEl.value;document.getElementById("cvLab").textContent=pct(s.cv,0);};
+  } else {
+    document.querySelectorAll("#paramRows input, #paramRows select").forEach(el => {
+      el.onchange = e => {
+        const p = e.target.dataset.pkey.split("|"), f = e.target.dataset.field, v = e.target.type==="number" ? +e.target.value : e.target.value;
+        if (p[0] === "states") s.params.states[p[1]][p[2]][f] = v;
+        else if (p[0] === "strategies") p[2] === "matrix" ? s.params.strategies[p[1]].matrix[p[3]][f] = v : s.params.strategies[p[1]][p[2]][f] = v;
+      };
+    });
+  }
   document.getElementById("runSens").onclick=renderSens;
 }
 async function renderSens(){
   const s=state.sens,m=state.model,ws=document.getElementById("workspace");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
-  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv});}catch(e){return wsError(e);}
+  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params});}catch(e){return wsError(e);}
   const unit=R.unit;
-  ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). <b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions. Set from your own data for a real study.</div></div>${EXPORT_BAR}</div>
+  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions.`;
+  ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div></div></div>
       <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>

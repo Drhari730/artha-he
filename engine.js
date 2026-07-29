@@ -155,17 +155,48 @@ function modelIncremental(arr, lowerBetter) {
   d.forEach(s => { const f = fr.find(x => x.name === s.name); if (f) { s.incCost = f.incCost; s.incEff = f.incEff; s.icer = f.icer; s.status = f.status; } });
   return d;
 }
-function psaModel(m, N, iRef, iCmp, cv) {
-  // cv = analyst-set coefficient of variation applied to costs & transitions
-  // (utilities use a smaller SE, capped, as they are bounded 0-1). This is an
-  // ASSUMED level of uncertainty, not derived from data — the user chooses it.
+function psaModel(m, N, iRef, iCmp, cv, mode, params) {
   cv = (cv > 0) ? cv : 0.2;
-  const uSE = Math.min(0.08, 0.4 * cv), K = Math.max(4, 1 / (cv * cv));
+  const uSE = Math.min(0.08, 0.4 * cv), K_global = Math.max(4, 1 / (cv * cv));
   fixModel(m); const draws = [];
   for (let it = 0; it < N; it++) {
     const mm = JSON.parse(JSON.stringify(m));
-    mm.states.forEach(st => { if (+st.cost > 0) { const g = gammaMS(+st.cost, +st.cost * cv); st.cost = rgamma(g.shape, g.scale); } if (+st.util > 0 && +st.util < 1) { const b = betaMS(+st.util, uSE); st.util = rbeta(b.a, b.b); } });
-    mm.strategies.forEach(s => { s.matrix = s.matrix.map(row => { if (sum(row.map(Number)) === 0) return row; return rdirichlet(row.map(p => Math.max(0.0001, +p) * K)); }); });
+    if (mode === "per_parameter" && params) {
+      mm.states.forEach((st, i) => {
+        const pSt = params.states && params.states[i] ? params.states[i] : {};
+        if (st.cost > 0 && pSt.cost) {
+          if (pSt.cost.dist === "gamma") { const g = gammaMS(+pSt.cost.mean, +pSt.cost.se); st.cost = rgamma(g.shape, g.scale); }
+          else if (pSt.cost.dist === "normal") { st.cost = rnorm(+pSt.cost.mean, +pSt.cost.se); }
+          else if (pSt.cost.dist === "fixed") { st.cost = +pSt.cost.mean; }
+        }
+        if (st.util > 0 && st.util < 1 && pSt.util) {
+          if (pSt.util.dist === "beta") { const b = betaMS(+pSt.util.mean, +pSt.util.se); st.util = rbeta(b.a, b.b); }
+          else if (pSt.util.dist === "normal") { st.util = Math.max(0, Math.min(1, rnorm(+pSt.util.mean, +pSt.util.se))); }
+          else if (pSt.util.dist === "fixed") { st.util = +pSt.util.mean; }
+        }
+      });
+      mm.strategies.forEach((s, i) => {
+        const pStr = params.strategies && params.strategies[i] ? params.strategies[i] : {};
+        if (s.addCost > 0 && pStr.addCost) {
+          if (pStr.addCost.dist === "gamma") { const g = gammaMS(+pStr.addCost.mean, +pStr.addCost.se); s.addCost = rgamma(g.shape, g.scale); }
+          else if (pStr.addCost.dist === "normal") { s.addCost = rnorm(+pStr.addCost.mean, +pStr.addCost.se); }
+          else if (pStr.addCost.dist === "fixed") { s.addCost = +pStr.addCost.mean; }
+        }
+        if (pStr.matrix) {
+          s.matrix = s.matrix.map((row, rIdx) => {
+            if (sum(row.map(Number)) === 0) return row;
+            const mRow = pStr.matrix[rIdx];
+            if (mRow && mRow.dist === "dirichlet") { return rdirichlet(row.map(p => Math.max(0.0001, +p) * (+mRow.K > 0 ? +mRow.K : 100))); }
+            return row; // fixed fallback
+          });
+        } else {
+          s.matrix = s.matrix.map(row => { if (sum(row.map(Number)) === 0) return row; return row; });
+        }
+      });
+    } else {
+      mm.states.forEach(st => { if (+st.cost > 0) { const g = gammaMS(+st.cost, +st.cost * cv); st.cost = rgamma(g.shape, g.scale); } if (+st.util > 0 && +st.util < 1) { const b = betaMS(+st.util, uSE); st.util = rbeta(b.a, b.b); } });
+      mm.strategies.forEach(s => { s.matrix = s.matrix.map(row => { if (sum(row.map(Number)) === 0) return row; return rdirichlet(row.map(p => Math.max(0.0001, +p) * K_global)); }); });
+    }
     const ref = markovGeneric(mm, mm.strategies[iRef]), cmp = markovGeneric(mm, mm.strategies[iCmp]);
     const incEff = m.outcome === "QALY" ? (cmp.qaly - ref.qaly) : (ref.daly - cmp.daly);
     draws.push({ incCost: cmp.cost - ref.cost, incEff });
@@ -266,7 +297,7 @@ function computeModel(m) {
 }
 function computeSensitivity(p) {
   const m = p.model, N = p.N, iRef = Math.min(p.ref ?? 0, m.strategies.length - 1), iCmp = Math.min(p.cmp ?? 1, m.strategies.length - 1), wtp = p.wtp, cv = (p.cv > 0) ? p.cv : 0.2;
-  const draws = psaModel(m, N, iRef, iCmp, cv), curve = ceac(draws, seq(21).map(i => i * 50000)), pCE = sum(draws.map(x => nmb(x.incCost, x.incEff, wtp) > 0 ? 1 : 0)) / draws.length, ev = evpi(draws, wtp), tor = dsaModel(m, wtp, iRef, iCmp);
+  const draws = psaModel(m, N, iRef, iCmp, cv, p.mode, p.params), curve = ceac(draws, seq(21).map(i => i * 50000)), pCE = sum(draws.map(x => nmb(x.incCost, x.incEff, wtp) > 0 ? 1 : 0)) / draws.length, ev = evpi(draws, wtp), tor = dsaModel(m, wtp, iRef, iCmp);
   return { pCE, evpi: ev, ceac: curve, draws, tornado: tor, N, wtp, cv, unit: m.outcome === "QALY" ? "QALY" : "DALY averted", refName: m.strategies[iRef].name, cmpName: m.strategies[iCmp].name };
 }
 function computeBIA(b) { const rows = biaRun(b); return { rows, cumulative: rows[rows.length - 1].cum, peak: Math.max(...rows.map(r => r.impact)), eligible: b.population * b.eligible, population: b.population, horizon: b.horizon, startYear: b.startYear }; }
@@ -301,7 +332,7 @@ function buildReport(state) {
   const minc = modelIncremental(res, m.outcome === "DALY").sort((a, b) => a.cost - b.cost), unit = m.outcome === "QALY" ? "QALY" : "DALY averted";
   const modelSec = `<p>${m.states.length}-state Markov, ${m.strategies.length} strategies, ${m.horizon}-year horizon, ${pct(m.dCost, 0)} discounting, half-cycle correction. Outcome: ${m.outcome}.</p>` + tbl(["Strategy", "Cost", "QALYs", "DALYs", "ICER (₹/" + unit + ")", "Status"], minc.map(s => [s.name, fmtINR(s.cost), fmtNum(s.qaly, 3), fmtNum(s.daly, 3), s.icer == null ? "—" : fmtINR(s.icer), s.status]));
   const iRef = Math.min(state.sens.ref ?? 0, m.strategies.length - 1), iCmp = Math.min(state.sens.cmp ?? 1, m.strategies.length - 1);
-  const draws = psaModel(m, 500, iRef, iCmp), wtp = state.sens.wtp, pCE = sum(draws.map(x => nmb(x.incCost, x.incEff, wtp) > 0 ? 1 : 0)) / draws.length, ev = evpi(draws, wtp);
+  const draws = psaModel(m, 500, iRef, iCmp, state.sens.cv, state.sens.mode, state.sens.params), wtp = state.sens.wtp, pCE = sum(draws.map(x => nmb(x.incCost, x.incEff, wtp) > 0 ? 1 : 0)) / draws.length, ev = evpi(draws, wtp);
   const psaSec = `<p>Probabilistic sensitivity analysis (500 iterations), ${m.strategies[iCmp].name} vs ${m.strategies[iRef].name}. Probability cost-effective at ${fmtINR(wtp)}: <b>${pct(pCE)}</b>. EVPI per patient: <b>${fmtINR(ev)}</b>.</p>`;
   const b = biaRun(state.bia);
   const biaSec = `<p>Budget impact over ${state.bia.horizon} years from ${state.bia.startYear}. Cumulative net impact: <b>${fmtINR(b[b.length - 1].cum)}</b>.</p>` + tbl(["Year", "Uptake", "Net impact", "Cumulative"], b.map(r => [r.year, pct(r.uptake), fmtINR(r.impact), fmtINR(r.cum)]));
