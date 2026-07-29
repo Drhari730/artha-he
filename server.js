@@ -42,14 +42,17 @@ function serveStatic(req, res) {
   const filePath = path.normalize(path.join(PUBLIC, urlPath));
   if (!filePath.startsWith(PUBLIC)) { res.writeHead(403).end("Forbidden"); return; }
   fs.readFile(filePath, (err, data) => {
+    const headers = { "Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0" };
     if (err) {
       fs.readFile(path.join(PUBLIC, "index.html"), (e2, home) => {
-        if (e2) { res.writeHead(404).end("Not found"); return; }
-        res.writeHead(200, { "Content-Type": TYPES[".html"] }).end(home);
+        if (e2) { res.writeHead(404, headers).end("Not found"); return; }
+        headers["Content-Type"] = TYPES[".html"];
+        res.writeHead(200, headers).end(home);
       });
       return;
     }
-    res.writeHead(200, { "Content-Type": TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream" }).end(data);
+    headers["Content-Type"] = TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+    res.writeHead(200, headers).end(data);
   });
 }
 
