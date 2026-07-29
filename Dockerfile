@@ -1,5 +1,4 @@
-# Use the official Rocker image which comes with Plumber pre-installed and configured
-FROM rocker/plumber:latest
+FROM rocker/r-base:latest
 
 # Install necessary system dependencies for other packages
 RUN apt-get update -qq && apt-get install -y \
@@ -11,8 +10,8 @@ RUN apt-get update -qq && apt-get install -y \
 # Create application directory
 WORKDIR /app
 
-# Install additional R packages required by our engine
-RUN R -e "install.packages(c('jsonlite', 'dplyr'), repos='https://cloud.r-project.org/')"
+# Install R packages required by our engine and API
+RUN R -e "install.packages(c('plumber', 'jsonlite', 'dplyr'), repos='https://cloud.r-project.org/')"
 
 # Copy application files
 COPY engine.R plumber.R run.R /app/
