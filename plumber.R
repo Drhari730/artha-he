@@ -7,6 +7,9 @@ fmtINR <- function(x) paste0("\u20B9", formatC(x, format="f", big.mark=",", digi
 fmtNum <- function(x, dp=2) formatC(x, format="f", big.mark=",", digits=dp)
 pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 
+#* @assets ./public /
+list()
+
 #* @filter cors
 function(res) {
   res$setHeader("Access-Control-Allow-Origin", "*")
