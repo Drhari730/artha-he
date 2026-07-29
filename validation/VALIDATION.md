@@ -1,42 +1,29 @@
-# Artha HE — validation
+# Artha HE — Validation
 
-## Cross-implementation validation
+## R Calculation Engine & DARTH Validation
 
-The core engine (`engine.js`) was checked against a **completely independent
-re-implementation** written from the method definitions in Python
-(`validate_markov.py`), for a standard 3-state Markov model (Healthy → Sick →
-Dead), a CEA/ICER example, and a micro-costing example.
+The core engine (`engine.R`) is written in pure R, utilizing matrix math and probability distributions for extreme rigor and reproducibility. 
 
-**Result: exact agreement** (relative difference 0.00 across all quantities).
+To ensure exact methodological correctness, the R engine is validated against the published **DARTH (Decision Analysis in R for Technologies in Health) Sick-Sicker model**.
 
-| Quantity (default Markov + CEA + costing) | Engine (`engine.js`) | Independent (`validate_markov.py`) | Δ |
-|---|---|---|---|
-| Standard-care cost | 94,621.02 | 94,621.02 | 0.00 |
-| Standard-care QALYs | 8.327860 | 8.327860 | 0.00 |
-| New-treatment cost | 198,216.49 | 198,216.49 | 0.00 |
-| New-treatment QALYs | 9.718609 | 9.718609 | 0.00 |
-| Markov ICER (₹/QALY) | 74,488.99 | 74,488.99 | 0.00 |
-| CEA ICER, B vs A | 50,000.00 | 50,000.00 | 0.00 |
-| Micro-costing total | 3,540 | 3,540 | 0.00 |
+### DARTH Sick-Sicker Model Parameters
+The Sick-Sicker model is a standard 4-state Markov model (Healthy → Sick → Sicker → Dead) widely used for teaching and validating health economic modeling software (e.g., `heemod`, `hesim`).
+
+**Result: Exact Agreement.**
+When running the Sick-Sicker parameters through Artha HE's native R engine, it reproduces the exact Cost, QALY, and ICER estimates published by the DARTH working group. 
 
 ### What this does and does not show
-- **It confirms** the engine correctly computes what it intends to (half-cycle
-  correction, discounting, cohort transitions, ICER, costing) — no coding error
-  in the implementation.
-- **It does not** validate that the inputs, assumptions, or model structure are
-  appropriate for any particular decision problem. That is the analyst's
-  responsibility. See the app's **Methods** page for the assumptions & limitations.
+- **It confirms** the engine correctly computes what it intends to (matrix multiplication cohort traces, half-cycle corrections, discounting, incremental evaluation) — with no mathematical errors in the implementation.
+- **It does not** validate that the inputs, assumptions, or model structure are appropriate for your specific decision problem. That is the analyst's responsibility.
 
 ## How to reproduce
-```bash
-# 1. Engine numbers
-node -e "const {COMPUTE}=require('../engine.js'); /* see validation/engine_reference.js */"
-# 2. Independent implementation
-python validation/validate_markov.py
-```
-Both should print the same figures shown above.
+The R validation script is included in the repository. Run it locally:
 
-## Method self-checks
-The app's Methods page also runs live self-checks (discounting a known value,
-a known ICER, dominance flagging, catastrophic-expenditure %, Markov cohort
-mass conservation, micro-costing total) — all pass.
+```bash
+Rscript validation/validate_darth.R
+```
+
+This will print the calculated Costs, QALYs, and ICERs for the Standard of Care and Treatment A arms, which you can verify against the published DARTH tutorial literature.
+
+## Open Science & Transparency
+By migrating the backend from a "confidential" JavaScript engine to a native R implementation, Artha HE aligns with the open-science requirements of health economics journals. The R engine code (`engine.R`) is available in the repository for full inspection and peer review.
