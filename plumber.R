@@ -50,7 +50,6 @@ function(req) {
 }
 
 #* @serializer unboxedJSON
-#* @serializer unboxedJSON
 #* @post /api/evaluation
 function(req) {
   e <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
