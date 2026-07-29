@@ -10,6 +10,7 @@ pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 #* @assets ./public /
 list()
 
+#* @serializer unboxedJSON
 #* @filter cors
 function(res) {
   res$setHeader("Access-Control-Allow-Origin", "*")
@@ -26,6 +27,7 @@ function(res) {
 #* @options /api/bia
 function() {}
 
+#* @serializer unboxedJSON
 #* @post /api/costing
 function(req) {
   c <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
@@ -40,12 +42,15 @@ function(req) {
   list(method = "micro", total = r$total, byCat = r$byCat, lines = r$lines, toYear = as.numeric(c$toYear), inflation = as.numeric(c$inflation))
 }
 
+#* @serializer unboxedJSON
 #* @post /api/oop
 function(req) {
   o <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
   oopRun(o)
 }
 
+#* @serializer unboxedJSON
+#* @serializer unboxedJSON
 #* @post /api/evaluation
 function(req) {
   e <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
@@ -104,10 +109,12 @@ function(req) {
   list(type=e$type, requirements=reqs, rows=d, plane=plane, best=best, wtp=as.numeric(e$wtp), unit=unit, interpretation=interp)
 }
 
+#* @serializer unboxedJSON
 #* @post /api/model
 function(req) {
   m <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
-  res <- modelRunAll(m)
+  fixed <- fixModel(m)
+  res <- modelRunAll(fixed)
   res <- lapply(res, function(s) { s$eff <- if(m$outcome == "QALY") s$qaly else s$daly; s })
   inc <- modelIncremental(res, m$outcome == "DALY")
   ref <- inc[[1]]
@@ -137,6 +144,7 @@ function(req) {
   list(rows=inc, plane=plane, best=best, unit=unit, onFr=length(onFr), strategies=length(m$strategies), states=length(m$states), activeName=as_strat$name, series=series, stateNames=sapply(m$states, function(s) s$name), wtp=as.numeric(m$wtp), horizon=as.numeric(m$horizon), dCost=as.numeric(m$dCost), outcome=m$outcome, interpretation=interp)
 }
 
+#* @serializer unboxedJSON
 #* @post /api/sensitivity
 function(req) {
   p <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
@@ -154,9 +162,49 @@ function(req) {
   list(pCE = pCE, evpi = ev, ceac = curve, draws = draws, tornado = list(), N = N, wtp = wtp, cv = cv, unit = if(p$model$outcome=="QALY") "QALY" else "DALY averted", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
 }
 
+#* @serializer unboxedJSON
 #* @post /api/bia
 function(req) {
   b <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
   rows <- biaRun(b)
   list(rows = rows, cumulative = rows[[length(rows)]]$cum, peak = max(sapply(rows, function(r) r$impact)), eligible = as.numeric(b$population)*as.numeric(b$eligible), population = as.numeric(b$population), horizon = as.numeric(b$horizon), startYear = as.numeric(b$startYear))
+}
+
+#* @serializer unboxedJSON
+#* @options /api/validate
+#* @post /api/validate
+function(req) {
+  payload <- jsonlite::fromJSON(req$postBody, simplifyVector = FALSE)
+  v <- list()
+  ap <- function(a, b, t = 0.01) abs(a - b) <= t * max(1, abs(b))
+  
+  d <- 1000 / (1.03 ^ 5)
+  v[[1]] <- list(n = "Discount ₹1,000 at 3% for 5 years", got = fmtNum(d, 2), exp = "862.61", ok = ap(d, 862.6088))
+  
+  ic <- (85000 - 40000) / (4.4 - 3.5)
+  v[[2]] <- list(n = "ICER of (₹85k, 4.4) vs (₹40k, 3.5)", got = fmtINR(ic), exp = "₹50,000", ok = ap(ic, 50000))
+  
+  nb <- nmb(85000, 4.4, 200000)
+  v[[3]] <- list(n = "NMB at WTP ₹2,00,000 (cost 85k, 4.4 QALY)", got = fmtINR(nb), exp = "₹7,95,000", ok = ap(nb, 795000))
+  
+  strats <- list(list(strategy="A", cost=40000, effect=3.5), list(strategy="B", cost=50000, effect=3.2))
+  inc <- icerIncremental(strats)
+  dom <- Filter(function(x) x$strategy == "B", inc)[[1]]$status
+  v[[4]] <- list(n = "Costs more & less effective -> flagged dominated", got = dom, exp = "dominated", ok = dom == "dominated")
+  
+  o <- oopRun(list(income = 200000, nonFood = 120000, items = list(list(item="x", category="Direct medical", amount=47000))))
+  v[[5]] <- list(n = "OOP ₹47,000 / income ₹2,00,000", got = pct(o$pctInc), exp = "23.5%", ok = ap(o$pctInc * 100, 23.5))
+  
+  if (!is.null(payload$model)) {
+    fixed <- fixModel(payload$model)
+    arm <- markovGeneric(fixed, fixed$strats[[1]])
+    last_row <- arm$trace[nrow(arm$trace), ]
+    mass <- sum(last_row)
+    v[[6]] <- list(n = "Markov cohort mass conserved (Σ states = 1)", got = fmtNum(mass, 6), exp = "1.000000", ok = abs(mass - 1) < 1e-9)
+  }
+  
+  mc <- microCost(list(list(item="a", category="Direct medical", qty=2, unit=100, year=2024), list(item="b", category="Direct medical", qty=3, unit=50, year=2024)), 2024, 0)
+  v[[length(v)+1]] <- list(n = "Micro-cost: 2×₹100 + 3×₹50", got = fmtINR(mc$total), exp = "₹350", ok = ap(mc$total, 350))
+  
+  list(rows = v, allok = all(sapply(v, function(x) x$ok)))
 }
