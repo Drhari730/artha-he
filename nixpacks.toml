@@ -1,4 +1,3 @@
-providers = ["r"]
 
 [phases.setup]
 nixPkgs = ["R", "gcc"]
