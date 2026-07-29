@@ -165,7 +165,12 @@ const state={
     {item:"Insulin (1 month)",category:"Direct medical",quantity:6,unit_cost:900,year:2023},
     {item:"Nursing time (hour)",category:"Direct medical",quantity:3,unit_cost:250,year:2022},
     {item:"Patient travel",category:"Direct non-medical",quantity:8,unit_cost:150,year:2024},
-    {item:"Lost work day",category:"Indirect (productivity)",quantity:5,unit_cost:700,year:2024}],totalCost:5000000,output:1200},
+    {item:"Lost work day",category:"Indirect (productivity)",quantity:5,unit_cost:700,year:2024}],totalCost:5000000,output:1200,
+    adv:{discount:0.03,monthlyHours:160,output:1,
+      staff:[{role:"Medical officer",salary:60000,hours:4,sessions:1},{role:"Staff nurse",salary:21000,hours:4,sessions:1}],
+      equip:[{item:"Computer",price:40000,life:10,maintPct:0.05,usagePct:1,qty:1},{item:"Furniture set",price:25000,life:15,maintPct:0.05,usagePct:1,qty:1}],
+      consum:[{item:"IEC materials & printing",qty:1,unit:10000}],
+      space:[{item:"Room (annualised)",annual:12000}]}},
   oop:{income:200000,nonFood:120000,items:[
     {item:"Doctor consultation",category:"Direct medical",amount:1500},
     {item:"Diagnostics / lab",category:"Direct medical",amount:3000},
@@ -383,13 +388,36 @@ function enterApp(mod){document.getElementById("landing").style.display="none";d
 function backToLanding(){document.getElementById("appShell").style.display="none";const l=document.getElementById("landing");l.style.display="";window.scrollTo(0,0);}
 
 /* ============================ COSTING ============================ */
+const ADV_COLS={
+  staff:[{f:"role",t:"text",h:"Role"},{f:"salary",t:"number",h:"₹/mo"},{f:"hours",t:"number",h:"Hrs"},{f:"sessions",t:"number",h:"Sess"}],
+  equip:[{f:"item",t:"text",h:"Item"},{f:"price",t:"number",h:"Price ₹"},{f:"life",t:"number",h:"Life yr"},{f:"maintPct",t:"number",h:"Maint"},{f:"usagePct",t:"number",h:"Use"},{f:"qty",t:"number",h:"Qty"}],
+  consum:[{f:"item",t:"text",h:"Item"},{f:"qty",t:"number",h:"Qty"},{f:"unit",t:"number",h:"Unit ₹"}],
+  space:[{f:"item",t:"text",h:"Item"},{f:"annual",t:"number",h:"Annual ₹"}]
+};
+const ADV_NEW={staff:{role:"New role",salary:0,hours:1,sessions:1},equip:{item:"New item",price:0,life:5,maintPct:0.05,usagePct:1,qty:1},consum:{item:"New item",qty:1,unit:0},space:{item:"New space",annual:0}};
+const ADV_TITLE={staff:"Human resources — salary × time apportioned",equip:"Equipment / capital — annualised over its life",consum:"Consumables / recurring",space:"Space"};
+function advGrid(g){const cols=ADV_COLS[g],rows=state.costing.adv[g]||[];
+  const head=cols.map(c=>`<th>${c.h}</th>`).join("");
+  const body=rows.map((r,i)=>`<tr>${cols.map(c=>`<td><input data-ag="${g}" data-f="${c.f}" data-i="${i}" ${c.t==="number"?'type="number"':''} value="${r[c.f]}" ${c.t==="number"?'style="text-align:right"':''}></td>`).join("")}<td class="row-del" data-agdel="${g}" data-i="${i}">&times;</td></tr>`).join("");
+  return `<div class="sublabel">${ADV_TITLE[g]}</div><div class="grid-wrap"><table class="data-grid"><thead><tr>${head}<th></th></tr></thead><tbody>${body}</tbody></table></div><div class="btn-row"><button class="btn btn-secondary sm" data-agadd="${g}">+ Add</button></div>`;
+}
+function wireAdvGrids(){
+  document.querySelectorAll("#sidebar [data-ag]").forEach(el=>el.onchange=()=>{const g=el.dataset.ag,f=el.dataset.f,i=+el.dataset.i,col=ADV_COLS[g].find(c=>c.f===f);state.costing.adv[g][i][f]=col.t==="number"?+el.value:el.value;});
+  document.querySelectorAll("#sidebar [data-agdel]").forEach(el=>el.onclick=()=>{state.costing.adv[el.dataset.agdel].splice(+el.dataset.i,1);renderCostingSidebar();});
+  document.querySelectorAll("#sidebar [data-agadd]").forEach(el=>el.onclick=()=>{const g=el.dataset.agadd;state.costing.adv[g].push({...ADV_NEW[g]});renderCostingSidebar();});
+}
 function renderCostingSidebar(){
   const c=state.costing,catOpts=cat=>COST_CATEGORIES.map(o=>`<option ${o===cat?"selected":""}>${o}</option>`).join("");
   const rows=c.rows.map((r,i)=>`<tr><td><input data-f="item" data-i="${i}" value="${r.item}"></td><td><select data-f="category" data-i="${i}">${catOpts(r.category)}</select></td><td><input data-f="quantity" data-i="${i}" type="number" value="${r.quantity}" style="text-align:right"></td><td><input data-f="unit_cost" data-i="${i}" type="number" value="${r.unit_cost}" style="text-align:right"></td><td><input data-f="year" data-i="${i}" type="number" value="${r.year}" style="text-align:right"></td><td class="row-del" data-del="${i}">&times;</td></tr>`).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">01</span> Costing</h2>
-    <p class="hint">Cost a programme from resource use (micro) or a total budget (gross).</p>
+    <p class="hint">Cost a programme bottom-up (micro), with full activity-based method incl. staff apportioning &amp; equipment annualisation (advanced), or top-down from a budget (gross).</p>
     ${exRow("costing")}
-    <div class="seg" id="costMethod"><button data-v="micro" class="${c.method==="micro"?"active":""}">Micro-costing</button><button data-v="gross" class="${c.method==="gross"?"active":""}">Gross-costing</button></div>
+    <div class="seg" id="costMethod"><button data-v="micro" class="${c.method==="micro"?"active":""}">Micro</button><button data-v="advanced" class="${c.method==="advanced"?"active":""}">Advanced</button><button data-v="gross" class="${c.method==="gross"?"active":""}">Gross</button></div>
+    <div id="advC" style="display:${c.method==="advanced"?"block":"none"}">
+      <p class="hint">Activity-based micro-costing done properly: <b>staff</b> costed by salary × time-share, <b>equipment</b> annualised over its useful life (equivalent annual cost), plus consumables and space.</p>
+      ${c.method==="advanced"?advGrid("staff")+advGrid("equip")+advGrid("consum")+advGrid("space"):""}
+      <div class="field two"><div><label>Discount rate (annualisation)</label><input type="number" id="advDisc" step="0.01" value="${c.adv.discount}"></div><div><label>Working hrs / month</label><input type="number" id="advMH" value="${c.adv.monthlyHours}"></div></div>
+      <div class="field"><label>Output units (for cost per unit)</label><input type="number" id="advOut" value="${c.adv.output}"></div></div>
     <div id="microC" style="display:${c.method==="micro"?"block":"none"}">
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
       <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><button class="btn btn-ghost sm" id="clearRows">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
@@ -412,6 +440,10 @@ function renderCostingSidebar(){
   const op=document.getElementById("output");if(op)op.onchange=()=>c.output=+op.value;
   const tpl=document.getElementById("tplCost");if(tpl)tpl.onclick=()=>dlTemplate("costing");
   const rp=document.getElementById("refPick");if(rp)rp.onchange=()=>{const u=REFDATA.unitCosts[+rp.value];if(!u)return;c.rows.push({item:u.item,category:u.category,quantity:1,unit_cost:u.value,year:c.toYear});renderCostingSidebar();renderCosting();};
+  if(c.method==="advanced"){wireAdvGrids();
+    const ad=document.getElementById("advDisc");if(ad)ad.onchange=()=>c.adv.discount=+ad.value;
+    const mh=document.getElementById("advMH");if(mh)mh.onchange=()=>c.adv.monthlyHours=+mh.value;
+    const ao=document.getElementById("advOut");if(ao)ao.onchange=()=>c.adv.output=+ao.value;}
   const cf=document.getElementById("csvFile");if(cf)cf.onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{c.rows=parseCSV(rd.result);renderCostingSidebar();renderCosting();};rd.readAsText(f);};
   document.getElementById("calcBtn").onclick=renderCosting;
   wireExamples("costing");
@@ -424,6 +456,30 @@ async function renderCosting(){
       <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi gold"><div class="k-label">Cost per unit</div><div class="k-val">${compactINR(per)}</div><div class="k-sub">over ${fmtNum(res.output,0)} units</div></div></div>
       <div class="card"><h3>Calculation</h3><table class="results-table"><tbody><tr><td>Total cost</td><td>${fmtINR(res.total)}</td></tr><tr><td>Output units</td><td>${fmtNum(res.output,0)}</td></tr><tr><td>Average cost per unit</td><td>${fmtINR(per,2)}</td></tr></tbody></table></div>`;
     wireExports("Artha Gross Costing");return;}
+  if(res.method==="advanced"){
+    const bars=res.breakdown.map((b,i)=>({label:b.component,value:b.amount,tag:compactINR(b.amount)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
+    const brk=res.breakdown.map(b=>`<tr><td>${b.component}</td><td>${fmtINR(b.amount)}</td><td>${pct(b.share)}</td></tr>`).join("");
+    const detail=res.groups.map(g=>{
+      let cols,rowsH;
+      if(g.key==="staff"){cols=["Role","Salary/mo","Hours","Sessions","Apportion","Cost"];rowsH=g.items.map(x=>`<tr><td>${x.role}</td><td>${fmtINR(x.salary)}</td><td>${fmtNum(x.hours,0)}</td><td>${fmtNum(x.sessions,0)}</td><td>${fmtNum(x.apportion,4)}</td><td>${fmtINR(x.line)}</td></tr>`).join("");}
+      else if(g.key==="equip"){cols=["Item","Price","Life (yr)","Annualis. factor","Annual capital","Annual maint.","Cost"];rowsH=g.items.map(x=>`<tr><td>${x.item}</td><td>${fmtINR(x.price)}</td><td>${fmtNum(x.life,0)}</td><td>${fmtNum(x.af,5)}</td><td>${fmtINR(x.annualCapital)}</td><td>${fmtINR(x.annualMaint)}</td><td>${fmtINR(x.line)}</td></tr>`).join("");}
+      else if(g.key==="consum"){cols=["Item","Qty","Unit","Cost"];rowsH=g.items.map(x=>`<tr><td>${x.item}</td><td>${fmtNum(x.qty,0)}</td><td>${fmtINR(x.unit)}</td><td>${fmtINR(x.line)}</td></tr>`).join("");}
+      else{cols=["Item","Annual cost"];rowsH=g.items.map(x=>`<tr><td>${x.item}</td><td>${fmtINR(x.line)}</td></tr>`).join("");}
+      return `<div class="card"><h3>${g.label}</h3><div class="card-sub">Sub-total: <b>${fmtINR(g.total)}</b></div><div class="table-scroll"><table class="results-table"><thead><tr>${cols.map((h,i)=>`<th${i===0?' style="text-align:left"':''}>${h}</th>`).join("")}</tr></thead><tbody>${rowsH}</tbody></table></div></div>`;
+    }).join("");
+    ws.innerHTML=`<div class="ws-head"><div><h2>Advanced (activity-based) costing</h2><div class="sub">Staff costed by salary-apportioning (÷ ${res.monthlyHours} hrs/month); equipment annualised at ${pct(res.discount,0)} over its useful life. This is how a full micro-costing study is built.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">Total annual cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi gold"><div class="k-label">Cost per unit</div><div class="k-val">${compactINR(res.perUnit)}</div><div class="k-sub">over ${fmtNum(res.output,0)} unit(s)</div></div><div class="kpi emerald"><div class="k-label">Cost components</div><div class="k-val mono">${res.groups.length}</div></div></div>
+      <div class="result-tabs" id="costTabs"><button class="result-tab active" data-p="brk">Breakdown</button><button class="result-tab" data-p="det">Line detail</button></div>
+      <div class="pane active" data-pane="brk"><div class="card flush"><div class="pad"><h3>Cost by component</h3><div class="card-sub">Share of the total annual cost by resource type.</div>${barChartH(bars)}</div></div>
+        <div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Component</th><th>Amount</th><th>Share</th></tr></thead><tbody>${brk}</tbody><tfoot><tr><td>Total</td><td>${fmtINR(res.total)}</td><td>100%</td></tr></tfoot></table></div></div></div>
+      <div class="pane" data-pane="det">${detail}</div>`;
+    wireTabs("costTabs");wireExports("Artha Advanced Costing");
+    document.getElementById("workspace").insertAdjacentHTML("beforeend",interpCard([
+      `The total annual cost is ${fmtINR(res.total)} (${compactINR(res.perUnit)} per unit). ${res.breakdown.length?res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].component+" is the largest component ("+pct(res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].share)+").":""}`,
+      `Staff time is apportioned from monthly salary (salary ÷ ${res.monthlyHours} hrs × hours used); equipment is converted to an equivalent annual cost using the annualisation factor at ${pct(res.discount,0)}, so one-off purchases are spread fairly over their useful life.`,
+      `State your perspective, price year and the source of each unit cost/salary when reporting; annualisation and apportioning assumptions should be given in a methods table.`
+    ]));
+    return;}
   const bars=res.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
   const lr=res.lines.map(l=>`<tr><td>${l.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${l.category}</td><td>${fmtNum(l.quantity,0)}</td><td>${fmtINR(l.unit_cost_adj,0)}</td><td>${fmtINR(l.line_cost,0)}</td></tr>`).join("");
   ws.innerHTML=`<div class="ws-head"><div><h2>Micro costing</h2><div class="sub">Bottom-up: quantity × unit cost, inflated to ${c.toYear} prices (${pct(c.inflation)}/yr).</div></div>${EXPORT_BAR}</div>

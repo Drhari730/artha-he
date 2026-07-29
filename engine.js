@@ -40,6 +40,47 @@ function microCost(rows, ty, infl) {
   return { lines, total, byCat };
 }
 
+/* ---------- advanced (activity-based) costing ----------
+   Staff via salary-apportioning; capital via equivalent annual cost (annualisation);
+   plus recurring consumables and space. Mirrors standard micro-costing study method. */
+function annualisationFactor(d, L) { // d(1+d)^L / ((1+d)^L - 1); = 1/L when d=0
+  if (!L || L <= 0) return 1;
+  if (d <= 0) return 1 / L;
+  const f = Math.pow(1 + d, L);
+  return d * f / (f - 1);
+}
+function advancedCost(a) {
+  a = a || {};
+  const MH = (+a.monthlyHours > 0) ? +a.monthlyHours : 160;   // working hours/month (8h×5d×4wk)
+  const d = (+a.discount >= 0) ? +a.discount : 0.03;
+  const staff = (a.staff || []).map(s => {
+    const line = (+s.salary / MH) * (+s.hours || 0) * (+s.sessions > 0 ? +s.sessions : 1);
+    return { role: s.role, salary: +s.salary, hours: +s.hours || 0, sessions: +s.sessions > 0 ? +s.sessions : 1, apportion: (+s.hours || 0) * (+s.sessions > 0 ? +s.sessions : 1) / MH, line };
+  });
+  const equip = (a.equip || []).map(e => {
+    const AF = annualisationFactor(d, +e.life);
+    const usage = (e.usagePct != null && e.usagePct !== "") ? +e.usagePct : 1;
+    const qty = (+e.qty > 0) ? +e.qty : 1;
+    const annualCapital = (+e.price) * AF * qty;
+    const annualMaint = (+e.price) * qty * (+e.maintPct || 0);
+    const line = (annualCapital + annualMaint) * usage;
+    return { item: e.item, price: +e.price, qty, life: +e.life, af: AF, annualCapital, annualMaint, usage, line };
+  });
+  const consum = (a.consum || []).map(c => ({ item: c.item, qty: +c.qty || 0, unit: +c.unit || 0, line: (+c.qty || 0) * (+c.unit || 0) }));
+  const space = (a.space || []).map(s => ({ item: s.item, annual: +s.annual || 0, line: +s.annual || 0 }));
+  const sumL = arr => sum(arr.map(x => x.line || 0));
+  const groups = [
+    { key: "staff", label: "Human resources", items: staff, total: sumL(staff) },
+    { key: "equip", label: "Equipment / capital (annualised)", items: equip, total: sumL(equip) },
+    { key: "consum", label: "Consumables / recurring", items: consum, total: sumL(consum) },
+    { key: "space", label: "Space", items: space, total: sumL(space) }
+  ].filter(g => g.items.length);
+  const total = sum(groups.map(g => g.total));
+  const output = (+a.output > 0) ? +a.output : 1;
+  const breakdown = groups.map(g => ({ component: g.label, amount: g.total, share: total ? g.total / total : 0 }));
+  return { method: "advanced", total, perUnit: total / output, output, discount: d, monthlyHours: MH, groups, breakdown };
+}
+
 /* ---------- OOP / catastrophic expenditure ---------- */
 function oopRun(o) {
   const items = o.items.map(i => ({ ...i, amount: +i.amount }));
@@ -139,6 +180,7 @@ function biaRun(b) {
    =========================================================================== */
 function computeCosting(c) {
   if (c.method === "gross") { const per = c.output ? c.totalCost / c.output : 0; return { method: "gross", total: c.totalCost, output: c.output, per }; }
+  if (c.method === "advanced") return advancedCost(c.adv || {});
   const r = microCost(c.rows, c.toYear, c.inflation);
   return { method: "micro", total: r.total, byCat: r.byCat, lines: r.lines, toYear: c.toYear, inflation: c.inflation };
 }
