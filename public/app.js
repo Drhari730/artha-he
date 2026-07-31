@@ -176,6 +176,7 @@ const state={
   bia:{population:0,eligible:0,maxUptake:0,horizon:5,startYear:2025,costNew:0,costOld:0},
   vb:{tool:"qaly",
     qaly:{discount:0.03,rows:[]},
+    ly:{mode:"median",median:0,rate:0,survPct:0,survT:5,horizon:30,discount:0.03,util:0},
     util:{baseline:0,decs:[]},
     prob:{kind:"rate",val:0,t:1,cyc:1,hr:1,pbase:0,surv:0}}
 };
@@ -934,12 +935,17 @@ const VB_GUIDE={
   prob:{
     what:"A Markov model needs a <b>per-cycle transition probability</b>, but evidence usually comes as a <b>rate</b>, a <b>hazard ratio</b>, or a <b>survival proportion</b>. These convert on the rate scale: rate r ↔ probability p over time t by p = 1 − e^(−rt); a hazard ratio scales the rate; a survival S over t implies rate = −ln(S)/t (Briggs, Claxton &amp; Sculpher 2006; Fleurence 2007).",
     where:["A constant <b>rate</b> (events per person-year) — convert directly.","A <b>hazard ratio</b> from a trial/meta-analysis — apply it to the comparator's rate.","A <b>survival proportion</b> at a time-point (e.g. 5-year survival) — back out the rate."]
+  },
+  ly:{
+    what:"Mean survival (life-years) is the <b>area under the survival curve</b>. When you only have a summary — a <b>median</b>, a constant <b>hazard rate</b>, or a <b>survival proportion</b> at a time-point — the simplest defensible estimate assumes a <b>constant hazard (exponential survival)</b>: rate λ = −ln(S)/t; median = ln(2)/λ; mean survival = 1/λ. Over a fixed horizon T the <b>restricted mean survival</b> is (1 − e^(−λT))/λ, and discounted life-years use (λ + r) in place of λ. Life-years × utility = QALYs.",
+    where:["A <b>median survival</b> from a trial's Kaplan–Meier curve — the commonest input.","A <b>survival % at a time-point</b> (e.g. 5-year survival) or a hazard rate — from trial data or a published curve.","<b>Important:</b> the exponential (constant-hazard) assumption is a transparent starting point only. For a real HTA you should fit and compare several parametric models (exponential, Weibull, Gompertz, log-normal, log-logistic, generalised gamma) to the Kaplan–Meier data and justify the choice (NICE DSU TSD 14)."]
   }
 };
 const VB_REFS={
   qaly:["Weinstein MC, Torrance G, McGuire A. QALYs: the basics. <i>Value in Health</i> 2009;12(S1):S5–S9.","Drummond MF et al. <i>Methods for the Economic Evaluation of Health Care Programmes.</i> 4th ed. Oxford University Press, 2015.","Jyani G et al. Health-related quality of life among Indians: EQ-5D-5L value set. <i>Value in Health</i> 2020;23(3):S. (India value set).","Department of Health Research / HTAIn. <i>Health Technology Assessment India Reference Case</i>, 2018 (3% discounting, health-system/societal perspective)."],
   util:["Brazier J et al. <i>Measuring and Valuing Health Benefits for Economic Evaluation.</i> 2nd ed. OUP, 2017.","Ara R, Brazier J. Estimating health-state utility values for comorbidities. <i>PharmacoEconomics</i> 2017.","EuroQol Group. EQ-5D. Jyani G et al. India EQ-5D-5L value set, <i>Value in Health</i> 2020."],
-  prob:["Briggs A, Claxton K, Sculpher M. <i>Decision Modelling for Health Economic Evaluation.</i> OUP, 2006.","Fleurence RL, Hollenbeak CS. Rates and probabilities in economic modelling. <i>PharmacoEconomics</i> 2007;25(1):3–6.","Sonnenberg FA, Beck JR. Markov models in medical decision making. <i>Medical Decision Making</i> 1993;13(4):322–338."]
+  prob:["Briggs A, Claxton K, Sculpher M. <i>Decision Modelling for Health Economic Evaluation.</i> OUP, 2006.","Fleurence RL, Hollenbeak CS. Rates and probabilities in economic modelling. <i>PharmacoEconomics</i> 2007;25(1):3–6.","Sonnenberg FA, Beck JR. Markov models in medical decision making. <i>Medical Decision Making</i> 1993;13(4):322–338."],
+  ly:["Latimer NR. Survival analysis for economic evaluations alongside clinical trials — extrapolation with patient-level data. <i>NICE DSU Technical Support Document 14</i>, 2011 (updated 2013).","Collett D. <i>Modelling Survival Data in Medical Research.</i> 3rd ed. CRC Press, 2015.","Briggs A, Claxton K, Sculpher M. <i>Decision Modelling for Health Economic Evaluation.</i> OUP, 2006."]
 };
 function vbGuideCard(tool){const g=VB_GUIDE[tool];return `<div class="card" style="border-left:4px solid var(--primary)"><h3>How this is derived — and where the values come from</h3><div class="card-sub">Standard HTA method (not our invention).</div><p style="font-size:14px;line-height:1.65;color:var(--ink-soft);margin-bottom:12px">${g.what}</p><div class="sublabel" style="margin-top:0">Where to get the inputs</div><ul class="checklist">${g.where.map(w=>`<li><span class="ok">→</span><span>${w}</span></li>`).join("")}</ul></div>`;}
 function vbRefsCard(tool){return `<div class="card"><h3>References</h3><div class="card-sub">Methods above follow these standard sources — cite them (and your own data sources) when reporting.</div><ol style="margin:4px 0 0 18px;font-size:12.5px;line-height:1.6;color:var(--ink-soft)">${VB_REFS[tool].map(r=>`<li style="margin-bottom:5px">${r}</li>`).join("")}</ol></div>`;}
@@ -949,6 +955,19 @@ function qalyCompute(rows,r){
     for(let k=0;k<whole;k++)d+=u/Math.pow(1+r,t+k);const frac=y-whole;if(frac>0)d+=u*frac/Math.pow(1+r,t+whole);
     disc+=d;t+=y;return{label:row.label,util:u,years:y,qaly:d};});
   return{parts,disc,undisc,ly};
+}
+function lyCompute(p){
+  let lambda=0;
+  if(p.mode==="median") lambda = +p.median>0 ? Math.log(2)/+p.median : 0;
+  else if(p.mode==="rate") lambda = +p.rate>0 ? +p.rate : 0;
+  else lambda = (+p.survPct>0 && +p.survPct<1 && +p.survT>0) ? -Math.log(+p.survPct)/+p.survT : 0;
+  const r=+p.discount>=0?+p.discount:0, T=+p.horizon>0?+p.horizon:60;
+  const median = lambda>0 ? Math.log(2)/lambda : 0;
+  const meanUnbounded = lambda>0 ? 1/lambda : Infinity;
+  const rmst = lambda>0 ? (1-Math.exp(-lambda*T))/lambda : T;              // undiscounted restricted mean survival
+  const discLY = (lambda+r)>0 ? (1-Math.exp(-(lambda+r)*T))/(lambda+r) : T; // discounted life-years over horizon
+  const util=+p.util>0?+p.util:0, qaly=discLY*util;
+  return {lambda, median, meanUnbounded, rmst, discLY, util, qaly, T, r};
 }
 function renderVbSidebar(){
   const v=state.vb;
@@ -971,6 +990,16 @@ function renderVbSidebar(){
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Cause</th><th>Disutility</th><th></th></tr></thead><tbody id="uRows">${decs}</tbody></table></div>
       <div class="btn-row"><button class="btn btn-secondary sm" id="uAdd">+ Add</button></div>
       <div class="divider"></div><button class="btn btn-primary btn-block" id="uGo">Compute utility</button>`;
+  } else if(v.tool==="ly"){
+    const l=v.ly;
+    body=`<p class="hint">Turn a survival summary — a <b>median</b>, a <b>hazard rate</b>, or a <b>survival %</b> — into <b>mean life-years</b> (and QALYs if you add a utility). This assumes a constant hazard (exponential survival); see the notes on when to fit richer survival models.</p>
+      <div class="seg" id="lyMode"><button data-m="median" class="${l.mode==="median"?"active":""}">Median</button><button data-m="rate" class="${l.mode==="rate"?"active":""}">Hazard rate</button><button data-m="survPct" class="${l.mode==="survPct"?"active":""}">Survival %</button></div>
+      ${l.mode==="median"?`<div class="field"><label>Median survival (years)</label><input type="number" id="lMedian" step="0.1" value="${l.median}"></div>`:""}
+      ${l.mode==="rate"?`<div class="field"><label>Hazard rate (events per person-year)</label><input type="number" id="lRate" step="0.01" value="${l.rate}"></div>`:""}
+      ${l.mode==="survPct"?`<div class="field two"><div><label>Survival fraction (0–1)</label><input type="number" id="lSurv" step="0.01" value="${l.survPct}"></div><div><label>at time (yrs)</label><input type="number" id="lSurvT" step="0.5" value="${l.survT}"></div></div>`:""}
+      <div class="field two"><div><label>Time horizon (yrs)</label><input type="number" id="lHor" value="${l.horizon}"></div><div><label>Discount (health)</label><input type="number" id="lDisc" step="0.01" value="${l.discount}"></div></div>
+      <div class="field"><label>Mean utility (optional → gives QALYs)</label><input type="number" id="lUtil" step="0.01" value="${l.util}"></div>
+      <div class="divider"></div><button class="btn btn-primary btn-block" id="lGo">Compute life-years</button>`;
   } else {
     const p=v.prob;
     body=`<p class="hint">Turn the evidence you actually have — a <b>rate</b>, a <b>hazard ratio</b>, or a <b>survival %</b> — into the per-cycle transition <b>probability</b> your model needs.</p>
@@ -981,7 +1010,7 @@ function renderVbSidebar(){
   }
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">V</span> Value Builder</h2>
     <div class="callout">This is what makes the tool worth using: it <b>derives the hard inputs</b> — QALYs, utilities, transition probabilities — that you then feed into Evaluation or Modeling.</div>
-    <div class="seg" id="vbTool"><button data-t="qaly" class="${v.tool==="qaly"?"active":""}">QALYs</button><button data-t="util" class="${v.tool==="util"?"active":""}">Utility</button><button data-t="prob" class="${v.tool==="prob"?"active":""}">Transition prob</button></div>
+    <div class="seg" id="vbTool"><button data-t="qaly" class="${v.tool==="qaly"?"active":""}">QALYs</button><button data-t="ly" class="${v.tool==="ly"?"active":""}">Life-years</button><button data-t="util" class="${v.tool==="util"?"active":""}">Utility</button><button data-t="prob" class="${v.tool==="prob"?"active":""}">Transition prob</button></div>
     ${body}`;
   document.querySelectorAll("#vbTool button").forEach(b=>b.onclick=()=>{v.tool=b.dataset.t;renderVbSidebar();renderVb();});
   // QALY
@@ -999,6 +1028,10 @@ function renderVbSidebar(){
   document.querySelectorAll("#uRows .row-del").forEach(el=>el.onclick=()=>{v.util.decs.splice(+el.dataset.udel,1);renderVbSidebar();renderVb();});
   const uadd=document.getElementById("uAdd");if(uadd)uadd.onclick=()=>{v.util.decs.push({label:"Disutility",value:0.05,years:1});renderVbSidebar();};
   const ug=document.getElementById("uGo");if(ug)ug.onclick=renderVb;
+  // Life-years
+  document.querySelectorAll("#lyMode button").forEach(b=>b.onclick=()=>{v.ly.mode=b.dataset.m;renderVbSidebar();renderVb();});
+  [["lMedian","median"],["lRate","rate"],["lSurv","survPct"],["lSurvT","survT"],["lHor","horizon"],["lDisc","discount"],["lUtil","util"]].forEach(a=>{const el=document.getElementById(a[0]);if(el)el.oninput=()=>{v.ly[a[1]]=+el.value;renderVb();};});
+  const lg=document.getElementById("lGo");if(lg)lg.onclick=renderVb;
   // Prob
   document.querySelectorAll("#probKind button").forEach(b=>b.onclick=()=>{v.prob.kind=b.dataset.k;renderVbSidebar();renderVb();});
   ["pVal","pT","pCyc","pBase","pHR","pSurv","pT2","pCyc2"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=()=>{const map={pVal:"val",pT:"t",pCyc:"cyc",pBase:"pbase",pHR:"hr",pSurv:"surv",pT2:"t",pCyc2:"cyc"};v.prob[map[id]]=+el.value;renderVb();};});
@@ -1035,6 +1068,26 @@ function renderVb(){
       <p class="note">Indicative catalogue values are starting points — confirm the utility for your exact condition, instrument and population from a published source.</p></div>`;
     document.getElementById("workspace").insertAdjacentHTML("beforeend",vbGuideCard("util")+vbRefsCard("util"));
     wireExports("Artha Utility");
+    return;
+  }
+  if(v.tool==="ly"){
+    const L=lyCompute(v.ly);
+    if(!(L.lambda>0))return emptyState("Survival → life-years","Enter a median survival, a hazard rate, or a survival % at a time-point in the panel on the left, then Compute. This derives mean life-years from a survival summary (constant-hazard assumption).");
+    const qk=L.util>0?`<div class="kpi emerald"><div class="k-label">QALYs</div><div class="k-val">${fmtNum(L.qaly,3)}</div><div class="k-sub">disc. LY × utility ${fmtNum(L.util,2)}</div></div>`:"";
+    ws.innerHTML=`<div class="ws-head"><div><h2>Survival → life-years</h2><div class="sub">Mean life-years from a survival summary, assuming a constant hazard (exponential). Restricted to a ${L.T}-year horizon; discounted at ${pct(L.r,0)}.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">Mean life-years (restricted)</div><div class="k-val">${fmtNum(L.rmst,3)}</div><div class="k-sub">over ${L.T} yrs</div></div><div class="kpi"><div class="k-label">Discounted life-years</div><div class="k-val mono">${fmtNum(L.discLY,3)}</div></div><div class="kpi gold"><div class="k-label">Hazard rate</div><div class="k-val mono">${fmtNum(L.lambda,4)}</div><div class="k-sub">median ${fmtNum(L.median,2)} yr</div></div>${qk}</div>
+      <div class="btn-row"><button class="btn btn-primary sm" id="lSendQaly">→ Add as a period in the QALY builder</button>${L.util>0?`<button class="btn btn-secondary sm" id="lSendEval">→ Use QALYs as a strategy in Evaluation</button>`:""}</div>
+      <div class="card"><h3>How this was derived</h3><table class="results-table"><tbody>
+        <tr><td>Hazard rate λ (constant)</td><td>${fmtNum(L.lambda,4)} /yr</td></tr>
+        <tr><td>Median survival = ln(2)/λ</td><td>${fmtNum(L.median,2)} yr</td></tr>
+        <tr><td>Mean survival = 1/λ (unbounded)</td><td>${isFinite(L.meanUnbounded)?fmtNum(L.meanUnbounded,2):"—"} yr</td></tr>
+        <tr><td>Restricted mean over ${L.T} yr</td><td>${fmtNum(L.rmst,3)} LY</td></tr>
+        <tr><td>Discounted life-years (${pct(L.r,0)})</td><td>${fmtNum(L.discLY,3)} LY</td></tr>
+      </tbody></table></div>`;
+    wireExports("Artha Life-years");
+    document.getElementById("lSendQaly").onclick=()=>{v.qaly.rows.push({label:"Survival period",util:L.util>0?L.util:0.8,years:+L.discLY.toFixed(2)});v.tool="qaly";renderVbSidebar();renderVb();};
+    const se=document.getElementById("lSendEval");if(se)se.onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(L.qaly,2)+" QALY)",cost:0,effect:+L.qaly.toFixed(3)});route("evaluation");};
+    document.getElementById("workspace").insertAdjacentHTML("beforeend",vbGuideCard("ly")+vbRefsCard("ly"));
     return;
   }
   // prob
