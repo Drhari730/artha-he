@@ -10,27 +10,6 @@ pct <- function(x, dp=1) paste0(formatC(x * 100, format="f", digits=dp), "%")
 #* @assets ./public /
 list()
 
-#* @options /api/eval
-#* @post /api/eval
-function(req) {
-  code <- rawToChar(req$bodyRaw)
-  tryCatch({
-    res <- eval(parse(text = code))
-    list(success = TRUE, result = capture.output(print(res)))
-  }, error = function(e) {
-    list(success = FALSE, error = e$message, call = deparse(e$call))
-  })
-}
-function(req) {
-  list(
-    has_bodyRaw = !is.null(req$bodyRaw),
-    is_char_postBody = is.character(req$postBody),
-    typeof_postBody = typeof(req$postBody),
-    typeof_body = typeof(req$body),
-    test = "v2"
-  )
-}
-
 parse_req <- function(req) {
   if (!is.null(req$bodyRaw)) {
     return(jsonlite::fromJSON(rawToChar(req$bodyRaw), simplifyVector = FALSE))
@@ -157,9 +136,10 @@ function(req) {
   plane <- lapply(inc, function(s) { list(label=s$name, dEff=if(m$outcome=="DALY") ref$daly - s$daly else s$qaly - ref$qaly, dCost=s$cost - ref$cost, ref=s$name == ref$name) })
   
   as_idx <- if(!is.null(m$activeStrat)) as.numeric(m$activeStrat) + 1 else 1
-  as_strat <- m$strategies[[as_idx]]
-  trace <- markovGeneric(fixModel(m), as_strat)$trace
-  
+  if (as_idx < 1 || as_idx > length(fixed$strategies)) as_idx <- 1
+  as_strat <- fixed$strategies[[as_idx]]
+  trace <- markovGeneric(fixed, as_strat)$trace
+
   series <- lapply(seq_along(m$states), function(si) {
     list(label=m$states[[si]]$name, idx=si-1, data=lapply(1:nrow(trace), function(t) { list(x=(t-1)*as.numeric(m$cycle), y=trace[t, si]) }))
   })
@@ -184,12 +164,13 @@ function(req) {
   wtp <- as.numeric(p$wtp)
   cv <- if(!is.null(p$cv) && as.numeric(p$cv)>0) as.numeric(p$cv) else 0.2
   
-  draws <- psaModel(p$model, N, iRef, iCmp, cv, p$mode, p$params)
+  draws <- psaModel(p$model, N, iRef, iCmp, cv, p[["mode"]], p[["params"]])
   curve <- ceac(draws, seq(0, 1000000, by=50000))
   pCE <- sum(sapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0)) / length(draws)
   ev <- evpi(draws, wtp)
-  
-  list(pCE = pCE, evpi = ev, ceac = curve, draws = draws, tornado = list(), N = N, wtp = wtp, cv = cv, unit = if(p$model$outcome=="QALY") "QALY" else "DALY averted", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
+  tor <- dsaModel(p$model, wtp, iRef, iCmp)
+
+  list(pCE = pCE, evpi = ev, ceac = curve, draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, unit = if(p$model$outcome=="QALY") "QALY" else "DALY averted", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
 }
 
 #* @serializer unboxedJSON
@@ -198,6 +179,73 @@ function(req) {
   b <- parse_req(req)
   rows <- biaRun(b)
   list(rows = rows, cumulative = rows[[length(rows)]]$cum, peak = max(sapply(rows, function(r) r$impact)), eligible = as.numeric(b$population)*as.numeric(b$eligible), population = as.numeric(b$population), horizon = as.numeric(b$horizon), startYear = as.numeric(b$startYear))
+}
+
+#* @serializer unboxedJSON
+#* @options /api/report
+#* @post /api/report
+function(req) {
+  st <- parse_req(req)
+  dt <- format(Sys.Date(), "%d %B %Y")
+  tbl <- function(head, rows) {
+    h <- paste0("<tr>", paste0("<th>", head, "</th>", collapse=""), "</tr>")
+    b <- paste0(sapply(rows, function(r) paste0("<tr>", paste0("<td>", r, "</td>", collapse=""), "</tr>")), collapse="")
+    paste0("<table>", h, b, "</table>")
+  }
+  # 1 Costing
+  cst <- st$costing
+  if (!is.null(cst$method) && cst$method == "gross") {
+    per <- if (as.numeric(cst$output) > 0) as.numeric(cst$totalCost)/as.numeric(cst$output) else 0
+    costSec <- paste0("<p>Gross (top-down) costing.</p>", tbl(c("Metric","Value"), list(c("Total cost", fmtINR(as.numeric(cst$totalCost))), c("Output units", fmtNum(as.numeric(cst$output),0)), c("Cost per unit", fmtINR(per)))))
+  } else if (!is.null(cst$method) && cst$method == "advanced") {
+    ac <- advancedCost(cst$adv)
+    costSec <- paste0("<p>Advanced (activity-based) costing. <b>Total: ", fmtINR(ac$total), "</b> (", fmtINR(ac$perUnit), " per unit).</p>", tbl(c("Component","Amount","Share"), lapply(ac$breakdown, function(x) c(x$component, fmtINR(x$amount), pct(x$share)))))
+  } else {
+    r <- microCost(cst$rows, as.numeric(cst$toYear), as.numeric(cst$inflation))
+    costSec <- paste0("<p>Micro (bottom-up) costing, ", cst$toYear, " prices. <b>Total cost: ", fmtINR(r$total), "</b>.</p>", tbl(c("Category","Cost","Share"), lapply(r$byCat, function(x) c(x$category, fmtINR(x$cost), pct(x$share)))))
+  }
+  # 2 OOP
+  o <- oopRun(st$oop)
+  oopSec <- paste0("<p>Total out-of-pocket: <b>", fmtINR(o$total), "</b> - ", pct(o$pctInc), " of income. Catastrophic at 10% income: <b>", if(o$che10) "Yes" else "No", "</b>; at 40% capacity-to-pay: <b>", if(o$che40) "Yes" else "No", "</b>.</p>")
+  # 3 Evaluation
+  e <- st$evaluation
+  if (e$type == "CEA" || e$type == "CUA") {
+    inc <- icerIncremental(e$strats)
+    evalSec <- paste0("<p>", e$type, ", WTP ", fmtINR(as.numeric(e$wtp)), ".</p>", tbl(c("Strategy","Cost","Effect","ICER","Status"), lapply(inc, function(s) c(s$strategy, fmtINR(s$cost), fmtNum(s$effect,2), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
+  } else {
+    evalSec <- paste0("<p>", e$type, " analysis.</p>", tbl(c("Strategy","Cost","Outcome"), lapply(e$strats, function(s) c(s$strategy, fmtINR(as.numeric(s$cost)), fmtNum(as.numeric(s$effect),2)))))
+  }
+  # 4 Model
+  m <- st$model
+  res <- modelRunAll(m)
+  res <- lapply(res, function(s){ s$eff <- if(m$outcome=="QALY") s$qaly else s$daly; s })
+  minc <- modelIncremental(res, m$outcome=="DALY")
+  unit <- if(m$outcome=="QALY") "QALY" else "DALY averted"
+  modelSec <- paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", m$horizon, "-year horizon, ", pct(as.numeric(m$dCost),0), " discounting. Outcome: ", m$outcome, ".</p>", tbl(c("Strategy","Cost","QALYs","DALYs","ICER"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer)))))
+  # 5 PSA
+  iRef <- min(if(!is.null(st$sens$ref)) as.numeric(st$sens$ref) else 0, length(m$strategies)-1)
+  iCmp <- min(if(!is.null(st$sens$cmp)) as.numeric(st$sens$cmp) else 1, length(m$strategies)-1)
+  wtp <- as.numeric(st$sens$wtp); cvv <- if(!is.null(st$sens$cv)) as.numeric(st$sens$cv) else 0.2
+  draws <- psaModel(m, 500, iRef, iCmp, cvv, NULL, NULL)
+  pCE <- sum(sapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0)) / length(draws)
+  ev <- evpi(draws, wtp)
+  psaSec <- paste0("<p>PSA (500 iterations). Probability cost-effective at ", fmtINR(wtp), ": <b>", pct(pCE), "</b>. EVPI per patient: <b>", fmtINR(ev), "</b>.</p>")
+  # 6 BIA
+  br <- biaRun(st$bia)
+  biaSec <- paste0("<p>Budget impact over ", st$bia$horizon, " years. Cumulative net impact: <b>", fmtINR(br[[length(br)]]$cum), "</b>.</p>", tbl(c("Year","Uptake","Net impact","Cumulative"), lapply(br, function(r) c(r$year, pct(r$uptake), fmtINR(r$impact), fmtINR(r$cum)))))
+
+  html <- paste0(
+    "<h1>Artha HE - Health Economic Analysis Report</h1>",
+    "<p class='meta'>Generated ", dt, " . India reference case. Reporting structured to the CHEERS 2022 checklist.</p>",
+    "<h2>1 . Costing</h2>", costSec,
+    "<h2>2 . Out-of-pocket &amp; catastrophic expenditure</h2>", oopSec,
+    "<h2>3 . Economic evaluation</h2>", evalSec,
+    "<h2>4 . Decision-analytic model</h2>", modelSec,
+    "<h2>5 . Sensitivity analysis</h2>", psaSec,
+    "<h2>6 . Budget impact</h2>", biaSec,
+    "<p class='foot'>Generated by Artha HE . Developed by Dr G Hari Prakash . for research &amp; teaching. Verify inputs before formal use.</p>"
+  )
+  list(html = html)
 }
 
 #* @serializer unboxedJSON
@@ -227,13 +275,13 @@ function(req) {
   
   if (!is.null(payload$model)) {
     fixed <- fixModel(payload$model)
-    arm <- markovGeneric(fixed, fixed$strats[[1]])
+    arm <- markovGeneric(fixed, fixed$strategies[[1]])
     last_row <- arm$trace[nrow(arm$trace), ]
     mass <- sum(last_row)
     v[[6]] <- list(n = "Markov cohort mass conserved (Σ states = 1)", got = fmtNum(mass, 6), exp = "1.000000", ok = abs(mass - 1) < 1e-9)
   }
-  
-  mc <- microCost(list(list(item="a", category="Direct medical", qty=2, unit=100, year=2024), list(item="b", category="Direct medical", qty=3, unit=50, year=2024)), 2024, 0)
+
+  mc <- microCost(list(list(item="a", category="Direct medical", quantity=2, unit_cost=100, year=2024), list(item="b", category="Direct medical", quantity=3, unit_cost=50, year=2024)), 2024, 0)
   v[[length(v)+1]] <- list(n = "Micro-cost: 2×₹100 + 3×₹50", got = fmtINR(mc$total), exp = "₹350", ok = ap(mc$total, 350))
   
   list(rows = v, allok = all(sapply(v, function(x) x$ok)))

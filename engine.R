@@ -133,7 +133,8 @@ oopRun <- function(o) {
   
   byCat <- lapply(COST_CATEGORIES, function(cat) {
     cat_items <- Filter(function(i) !is.null(i$category) && i$category == cat, items)
-    cost <- sum(sapply(cat_items, function(i) i$amount))
+    if (length(cat_items) == 0) return(NULL)
+    cost <- sum(sapply(cat_items, function(i) as.numeric(i$amount)))
     if (cost > 0) {
       list(category = cat, cost = cost, share = ifelse(total > 0, cost / total, 0))
     } else {
@@ -141,7 +142,7 @@ oopRun <- function(o) {
     }
   })
   byCat <- Filter(Negate(is.null), byCat)
-  
+
   pctInc <- if (!is.null(o$income) && as.numeric(o$income) > 0) total / as.numeric(o$income) else 0
   pctCTP <- if (!is.null(o$nonFood) && as.numeric(o$nonFood) > 0) total / as.numeric(o$nonFood) else 0
   
@@ -219,34 +220,18 @@ evalRequirements <- function(type, strats) {
 fixModel <- function(m) {
   n <- length(m$states)
   m$strategies <- lapply(m$strategies, function(s) {
+    # idempotent: if already an n x n numeric matrix, leave it (avoids corruption on re-fix)
+    if (is.matrix(s$matrix) && nrow(s$matrix) == n && ncol(s$matrix) == n) return(s)
     M <- matrix(0, nrow=n, ncol=n)
     for (i in 1:n) {
       for (j in 1:n) {
-        v <- if (!is.null(s$matrix) && length(s$matrix) >= i && length(s$matrix[[i]]) >= j && !is.null(s$matrix[[i]][[j]])) as.numeric(s$matrix[[i]][[j]]) else (if (i==j) 1 else 0)
+        v <- if (!is.null(s$matrix) && length(s$matrix) >= i && !is.null(s$matrix[[i]]) && length(s$matrix[[i]]) >= j && !is.null(s$matrix[[i]][[j]])) as.numeric(s$matrix[[i]][[j]]) else (if (i==j) 1 else 0)
         M[i, j] <- v
       }
     }
     s$matrix <- M
-    
-    s$cost <- sapply(1:n, function(i) {
-      st <- m$states[[i]]
-      as.numeric(st$cost %||% 0) + (if(i==1) as.numeric(s$cost %||% 0) else 0)
-    })
-    s$util <- sapply(1:n, function(i) {
-      st <- m$states[[i]]
-      as.numeric(st$util %||% 0) + (if(i==1) as.numeric(s$util %||% 0) else 0)
-    })
-    s$daly <- sapply(1:n, function(i) {
-      st <- m$states[[i]]
-      as.numeric(st$daly %||% 0) + (if(i==1) as.numeric(s$daly %||% 0) else 0)
-    })
     s
   })
-  
-  for (i in 1:n) {
-    m$states[[i]]$dead <- as.logical(m$states[[i]]$dead %||% FALSE)
-  }
-  
   m
 }
 
@@ -381,7 +366,8 @@ psaModel <- function(m, N, iRef, iCmp, cv, mode, params) {
   
   for (it in 1:N) {
     mm <- jsonlite::fromJSON(jsonlite::toJSON(m, auto_unbox=TRUE), simplifyVector = FALSE)
-    
+    mm <- fixModel(mm)  # rebuild matrices as R matrices after JSON round-trip
+
     if (!is.null(mode) && mode == "per_parameter" && !is.null(params)) {
       for (i in seq_along(mm$states)) {
         st <- mm$states[[i]]
@@ -490,6 +476,41 @@ evpi <- function(d, w) {
   mm <- sum(sapply(nb, max)) / length(nb)
   mx <- max(sum(sapply(nb, function(x) x[1])) / length(nb), sum(sapply(nb, function(x) x[2])) / length(nb))
   max(0, mm - mx)
+}
+
+# --- Deterministic one-way sensitivity (tornado) ---
+dsaModel <- function(m, w, iRef, iCmp) {
+  m <- fixModel(m)
+  nmbPair <- function(mm) {
+    r <- markovGeneric(mm, mm$strategies[[iRef + 1]])
+    cc <- markovGeneric(mm, mm$strategies[[iCmp + 1]])
+    incC <- cc$cost - r$cost
+    incE <- if (m$outcome == "QALY") (cc$qaly - r$qaly) else (r$daly - cc$daly)
+    incE * w - incC
+  }
+  base <- nmbPair(m)
+  params <- list()
+  for (si in seq_along(m$strategies)) {
+    s <- m$strategies[[si]]
+    ac <- if (!is.null(s$addCost)) as.numeric(s$addCost) else 0
+    if (ac > 0) params <- append(params, list(list(label = paste0(s$name, " added cost"), kind = "strat", idx = si, field = "addCost", lo = ac * 0.7, hi = ac * 1.3)))
+  }
+  for (si in seq_along(m$states)) {
+    st <- m$states[[si]]
+    cst <- as.numeric(st$cost); utl <- as.numeric(st$util)
+    if (cst > 0) params <- append(params, list(list(label = paste0(st$name, " cost"), kind = "state", idx = si, field = "cost", lo = cst * 0.7, hi = cst * 1.3)))
+    if (utl > 0) params <- append(params, list(list(label = paste0(st$name, " utility"), kind = "state", idx = si, field = "util", lo = max(0, utl - 0.1), hi = min(1, utl + 0.1))))
+  }
+  out <- lapply(params, function(p) {
+    mlo <- m; mhi <- m
+    if (p$kind == "strat") { mlo$strategies[[p$idx]][[p$field]] <- p$lo; mhi$strategies[[p$idx]][[p$field]] <- p$hi }
+    else { mlo$states[[p$idx]][[p$field]] <- p$lo; mhi$states[[p$idx]][[p$field]] <- p$hi }
+    nL <- nmbPair(mlo); nH <- nmbPair(mhi)
+    list(label = p$label, low = min(nL, nH), high = max(nL, nH), swing = abs(nH - nL), base = base)
+  })
+  if (length(out) > 0) out <- out[order(sapply(out, function(x) -x$swing))]
+  if (length(out) > 8) out <- out[1:8]
+  out
 }
 
 # --- BIA ---
