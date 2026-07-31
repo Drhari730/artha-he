@@ -193,8 +193,33 @@ const state={
       {name:"New treatment",addCost:9000,matrix:[[0.8930,0.0975,0.0095],[0,0.90,0.10],[0,0,1]]}],
     cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1,startAge:30,bgMortality:false},
   sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2},
-  bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000}
+  bia:{population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000},
+  vb:{tool:"qaly",
+    qaly:{discount:0.03,rows:[{label:"On treatment (stable)",util:0.78,years:5},{label:"Progressed disease",util:0.55,years:3}]},
+    util:{baseline:0.82,decs:[{label:"Treatment side-effects",value:0.05,years:1}]},
+    prob:{kind:"rate",val:0.1,t:1,cyc:1,hr:0.7,pbase:0.15,surv:0.6}}
 };
+
+/* Indicative published health-state utilities (EQ-5D based, general literature).
+   INDICATIVE — confirm the value for your exact condition/population & source. */
+const UTILITY_CATALOGUE=[
+  {state:"Full health (by definition)",util:1.00},
+  {state:"General population (mixed ages)",util:0.86},
+  {state:"Well-controlled chronic disease",util:0.80},
+  {state:"Type 2 diabetes, no complications",util:0.78},
+  {state:"Diabetes with complications",util:0.66},
+  {state:"Post-myocardial infarction (stable)",util:0.72},
+  {state:"Heart failure (NYHA III)",util:0.60},
+  {state:"Stroke, moderate disability",util:0.55},
+  {state:"COPD (moderate)",util:0.75},
+  {state:"COPD (severe)",util:0.55},
+  {state:"On dialysis (ESRD)",util:0.60},
+  {state:"Cancer, on treatment",util:0.70},
+  {state:"Cancer, metastatic/progressive",util:0.50},
+  {state:"Depression (moderate)",util:0.60},
+  {state:"Blind / severe visual impairment",util:0.55},
+  {state:"Dead (by definition)",util:0.00}
+];
 
 /* ============================ EXAMPLES (general · public health · digital health) ====== */
 const EXAMPLES={
@@ -903,6 +928,110 @@ async function renderMethods(){
   </div>`;
 }
 
+/* ============================ VALUE BUILDER (derive the hard inputs) ============================ */
+function qalyCompute(rows,r){
+  let t=0,disc=0,undisc=0,ly=0;
+  const parts=rows.map(row=>{const u=+row.util,y=+row.years;undisc+=u*y;ly+=y;let d=0;const whole=Math.floor(y);
+    for(let k=0;k<whole;k++)d+=u/Math.pow(1+r,t+k);const frac=y-whole;if(frac>0)d+=u*frac/Math.pow(1+r,t+whole);
+    disc+=d;t+=y;return{label:row.label,util:u,years:y,qaly:d};});
+  return{parts,disc,undisc,ly};
+}
+function renderVbSidebar(){
+  const v=state.vb;
+  const catOpts=`<option value="">— insert from utility catalogue —</option>${UTILITY_CATALOGUE.map((u,i)=>`<option value="${i}">${u.state} · ${u.util.toFixed(2)}</option>`).join("")}`;
+  let body="";
+  if(v.tool==="qaly"){
+    const rows=v.qaly.rows.map((r,i)=>`<tr><td><input data-q="label" data-i="${i}" value="${r.label}"></td><td><input data-q="util" data-i="${i}" type="number" step="0.01" value="${r.util}" style="text-align:right"></td><td><input data-q="years" data-i="${i}" type="number" step="0.5" value="${r.years}" style="text-align:right"></td><td class="row-del" data-qdel="${i}">&times;</td></tr>`).join("");
+    body=`<p class="hint">Build a QALY from the health states a patient passes through — the <b>utility</b> (0–1) of each state and the <b>time</b> spent in it. This is the honest way to get a QALY instead of guessing one number.</p>
+      <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Health state / period</th><th>Utility</th><th>Years</th><th></th></tr></thead><tbody id="qRows">${rows}</tbody></table></div>
+      <div class="btn-row"><button class="btn btn-secondary sm" id="qAdd">+ Add state</button><button class="btn btn-ghost sm" id="qClear">Clear</button></div>
+      <div class="field"><label>Insert utility from catalogue</label><select id="qCat">${catOpts}</select></div>
+      <div class="field"><label>Discount rate (health)</label><input type="number" id="qDisc" step="0.01" value="${v.qaly.discount}"></div>
+      <div class="divider"></div><button class="btn btn-primary btn-block" id="qGo">Compute QALYs</button>`;
+  } else if(v.tool==="util"){
+    const decs=v.util.decs.map((d,i)=>`<tr><td><input data-u="label" data-i="${i}" value="${d.label}"></td><td><input data-u="value" data-i="${i}" type="number" step="0.01" value="${d.value}" style="text-align:right"></td><td class="row-del" data-udel="${i}">&times;</td></tr>`).join("");
+    body=`<p class="hint">Get a health-state <b>utility</b> — pick a published value from the catalogue, then subtract any <b>disutilities</b> (e.g. side-effects, comorbidity) to get the net utility to use.</p>
+      <div class="field"><label>Pick baseline utility from catalogue</label><select id="uCat">${catOpts}</select></div>
+      <div class="field"><label>Baseline utility (0–1)</label><input type="number" id="uBase" step="0.01" value="${v.util.baseline}"></div>
+      <div class="sublabel">Disutilities to subtract</div>
+      <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Cause</th><th>Disutility</th><th></th></tr></thead><tbody id="uRows">${decs}</tbody></table></div>
+      <div class="btn-row"><button class="btn btn-secondary sm" id="uAdd">+ Add</button></div>
+      <div class="divider"></div><button class="btn btn-primary btn-block" id="uGo">Compute utility</button>`;
+  } else {
+    const p=v.prob;
+    body=`<p class="hint">Turn the evidence you actually have — a <b>rate</b>, a <b>hazard ratio</b>, or a <b>survival %</b> — into the per-cycle transition <b>probability</b> your model needs.</p>
+      <div class="seg" id="probKind"><button data-k="rate" class="${p.kind==="rate"?"active":""}">Rate</button><button data-k="hr" class="${p.kind==="hr"?"active":""}">Hazard ratio</button><button data-k="surv" class="${p.kind==="surv"?"active":""}">Survival %</button></div>
+      ${p.kind==="rate"?`<div class="field"><label>Rate (events per person-year)</label><input type="number" id="pVal" step="0.01" value="${p.val}"></div><div class="field two"><div><label>over (yrs)</label><input type="number" id="pT" value="${p.t}"></div><div><label>cycle (yrs)</label><input type="number" id="pCyc" step="0.5" value="${p.cyc}"></div></div>`:""}
+      ${p.kind==="hr"?`<div class="field"><label>Baseline probability (per cycle)</label><input type="number" id="pBase" step="0.01" value="${p.pbase}"></div><div class="field"><label>Hazard ratio (treatment)</label><input type="number" id="pHR" step="0.05" value="${p.hr}"></div>`:""}
+      ${p.kind==="surv"?`<div class="field"><label>Survival fraction (0–1)</label><input type="number" id="pSurv" step="0.01" value="${p.surv}"></div><div class="field two"><div><label>over (yrs)</label><input type="number" id="pT2" value="${p.t}"></div><div><label>cycle (yrs)</label><input type="number" id="pCyc2" step="0.5" value="${p.cyc}"></div></div>`:""}`;
+  }
+  document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">V</span> Value Builder</h2>
+    <div class="callout">This is what makes the tool worth using: it <b>derives the hard inputs</b> — QALYs, utilities, transition probabilities — that you then feed into Evaluation or Modeling.</div>
+    <div class="seg" id="vbTool"><button data-t="qaly" class="${v.tool==="qaly"?"active":""}">QALYs</button><button data-t="util" class="${v.tool==="util"?"active":""}">Utility</button><button data-t="prob" class="${v.tool==="prob"?"active":""}">Transition prob</button></div>
+    ${body}`;
+  document.querySelectorAll("#vbTool button").forEach(b=>b.onclick=()=>{v.tool=b.dataset.t;renderVbSidebar();renderVb();});
+  // QALY
+  document.querySelectorAll("#qRows [data-q]").forEach(el=>el.onchange=()=>{v.qaly.rows[+el.dataset.i][el.dataset.q]=el.dataset.q==="label"?el.value:+el.value;renderVb();});
+  document.querySelectorAll("#qRows .row-del").forEach(el=>el.onclick=()=>{v.qaly.rows.splice(+el.dataset.qdel,1);renderVbSidebar();renderVb();});
+  const qa=document.getElementById("qAdd");if(qa)qa.onclick=()=>{v.qaly.rows.push({label:"New state",util:0.7,years:1});renderVbSidebar();};
+  const qc=document.getElementById("qClear");if(qc)qc.onclick=()=>{v.qaly.rows=[];renderVbSidebar();renderVb();};
+  const qcat=document.getElementById("qCat");if(qcat)qcat.onchange=()=>{const u=UTILITY_CATALOGUE[+qcat.value];if(!u)return;v.qaly.rows.push({label:u.state,util:u.util,years:1});renderVbSidebar();renderVb();};
+  const qd=document.getElementById("qDisc");if(qd)qd.onchange=()=>{v.qaly.discount=+qd.value;renderVb();};
+  const qg=document.getElementById("qGo");if(qg)qg.onclick=renderVb;
+  // Utility
+  const ucat=document.getElementById("uCat");if(ucat)ucat.onchange=()=>{const u=UTILITY_CATALOGUE[+ucat.value];if(!u)return;v.util.baseline=u.util;renderVbSidebar();renderVb();};
+  const ub=document.getElementById("uBase");if(ub)ub.onchange=()=>{v.util.baseline=+ub.value;renderVb();};
+  document.querySelectorAll("#uRows [data-u]").forEach(el=>el.onchange=()=>{v.util.decs[+el.dataset.i][el.dataset.u]=el.dataset.u==="label"?el.value:+el.value;renderVb();});
+  document.querySelectorAll("#uRows .row-del").forEach(el=>el.onclick=()=>{v.util.decs.splice(+el.dataset.udel,1);renderVbSidebar();renderVb();});
+  const uadd=document.getElementById("uAdd");if(uadd)uadd.onclick=()=>{v.util.decs.push({label:"Disutility",value:0.05,years:1});renderVbSidebar();};
+  const ug=document.getElementById("uGo");if(ug)ug.onclick=renderVb;
+  // Prob
+  document.querySelectorAll("#probKind button").forEach(b=>b.onclick=()=>{v.prob.kind=b.dataset.k;renderVbSidebar();renderVb();});
+  ["pVal","pT","pCyc","pBase","pHR","pSurv","pT2","pCyc2"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=()=>{const map={pVal:"val",pT:"t",pCyc:"cyc",pBase:"pbase",pHR:"hr",pSurv:"surv",pT2:"t",pCyc2:"cyc"};v.prob[map[id]]=+el.value;renderVb();};});
+}
+function renderVb(){
+  const v=state.vb,ws=document.getElementById("workspace");
+  if(v.tool==="qaly"){
+    const r=qalyCompute(v.qaly.rows,v.qaly.discount);
+    const bars=r.parts.map((p,i)=>({label:p.label,value:p.qaly,tag:fmtNum(p.qaly,3)+" QALY",color:SERIES[i%6]}));
+    const rows=r.parts.map(p=>`<tr><td>${p.label}</td><td>${fmtNum(p.util,2)}</td><td>${fmtNum(p.years,1)}</td><td>${fmtNum(p.qaly,3)}</td></tr>`).join("");
+    ws.innerHTML=`<div class="ws-head"><div><h2>QALY builder</h2><div class="sub">Discounted QALYs = Σ (utility × time in state), discounted at ${pct(v.qaly.discount,0)}. This is the value to enter as the <b>effect</b> for this option in the Evaluation tab.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">Discounted QALYs</div><div class="k-val">${fmtNum(r.disc,3)}</div><div class="k-sub">use this in Evaluation</div></div><div class="kpi"><div class="k-label">Undiscounted QALYs</div><div class="k-val mono">${fmtNum(r.undisc,3)}</div></div><div class="kpi gold"><div class="k-label">Total life-years</div><div class="k-val mono">${fmtNum(r.ly,1)}</div></div></div>
+      <div class="btn-row"><button class="btn btn-primary sm" id="qSend">→ Use as a new strategy in Evaluation</button></div>
+      <div class="result-tabs" id="vbTabs"><button class="result-tab active" data-p="chart">By state</button><button class="result-tab" data-p="tbl">Breakdown</button></div>
+      <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>QALY contribution by state</h3><div class="card-sub">How each health state adds to the total (discounted).</div>${barChartH(bars)}</div></div></div>
+      <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>State</th><th>Utility</th><th>Years</th><th>Disc. QALYs</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>Total</td><td></td><td>${fmtNum(r.ly,1)}</td><td>${fmtNum(r.disc,3)}</td></tr></tfoot></table></div></div></div>`;
+    wireTabs("vbTabs");wireExports("Artha QALY Builder");
+    document.getElementById("qSend").onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(r.disc,2)+" QALY)",cost:0,effect:+r.disc.toFixed(3)});route("evaluation");};
+    document.getElementById("workspace").insertAdjacentHTML("beforeend",interpCard([
+      `A patient in these states accrues ${fmtNum(r.disc,3)} discounted QALYs (${fmtNum(r.ly,1)} life-years at an average utility of ${fmtNum(r.undisc/(r.ly||1),2)}).`,
+      `Enter ${fmtNum(r.disc,3)} as the QALYs (effect) for this option in the Evaluation tab, and build the comparator the same way — the difference drives the ICER.`,
+      `Utilities should come from a validated instrument (e.g. EQ-5D with a country value set) or a published catalogue; state your source and discount rate when reporting.`
+    ]));
+    return;
+  }
+  if(v.tool==="util"){
+    const totDec=v.util.decs.reduce((s,d)=>s+(+d.value||0),0);
+    const net=Math.max(0,Math.min(1,v.util.baseline-totDec));
+    const rows=v.util.decs.map(d=>`<tr><td>${d.label}</td><td>−${fmtNum(d.value,2)}</td></tr>`).join("");
+    ws.innerHTML=`<div class="ws-head"><div><h2>Utility helper</h2><div class="sub">Net health-state utility = baseline − disutilities. Use this as a state's utility in the Modeling tab, or in the QALY builder.</div></div>${EXPORT_BAR}</div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">Net utility</div><div class="k-val">${fmtNum(net,3)}</div><div class="k-sub">0 = dead · 1 = full health</div></div><div class="kpi"><div class="k-label">Baseline</div><div class="k-val mono">${fmtNum(v.util.baseline,2)}</div></div><div class="kpi gold"><div class="k-label">Total disutility</div><div class="k-val mono">−${fmtNum(totDec,2)}</div></div></div>
+      <div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Component</th><th>Value</th></tr></thead><tbody><tr><td>Baseline utility</td><td>${fmtNum(v.util.baseline,2)}</td></tr>${rows}<tr style="font-weight:700"><td>Net utility</td><td>${fmtNum(net,3)}</td></tr></tbody></table></div>
+      <p class="note">Indicative catalogue values are starting points — confirm the utility for your exact condition, instrument and population from a published source.</p></div>`;
+    wireExports("Artha Utility");
+    return;
+  }
+  // prob
+  const p=v.prob; let out="",note="",title="";
+  if(p.kind==="rate"){const rate=+p.val,cyc=+p.cyc||1;const pc=1-Math.exp(-rate*cyc);title="Rate → probability";out=pc;note=`A rate of ${fmtNum(rate,3)}/person-year converts to a per-cycle (${cyc} yr) probability of <b>${fmtNum(pc,4)}</b> using p = 1 − e^(−rate × cycle).`;}
+  else if(p.kind==="hr"){const pb=+p.pbase,hr=+p.hr;const rb=-Math.log(1-pb);const rn=rb*hr;const pn=1-Math.exp(-rn);title="Hazard ratio → probability";out=pn;note=`A baseline probability of ${fmtNum(pb,3)} under a hazard ratio of ${fmtNum(hr,2)} gives an adjusted probability of <b>${fmtNum(pn,4)}</b> (convert to rate, multiply by HR, convert back).`;}
+  else {const S=+p.surv,tt=+p.t||1,cyc=+p.cyc||1;const rate=S>0&&S<1?-Math.log(S)/tt:0;const pc=1-Math.exp(-rate*cyc);title="Survival → probability";out=pc;note=`A survival of ${fmtNum(S,2)} over ${tt} year(s) implies a mortality rate of ${fmtNum(rate,4)}/yr and a per-cycle (${cyc} yr) probability of <b>${fmtNum(pc,4)}</b>.`;}
+  ws.innerHTML=`<div class="ws-head"><div><h2>Transition-probability builder</h2><div class="sub">Convert the evidence you have into the per-cycle probability your Markov model needs.</div></div></div>
+    <div class="kpis"><div class="kpi accent"><div class="k-label">${title}</div><div class="k-val mono">${fmtNum(out,4)}</div><div class="k-sub">per-cycle probability</div></div></div>
+    <div class="card"><h3>How this was derived</h3><p style="font-size:14px;line-height:1.6;color:var(--ink-soft)">${note}</p>
+    <p class="note">Enter this value in the transition matrix (Modeling tab). Remember each row of the matrix must sum to 1.</p></div>`;
+}
+
 /* ============================ REFERENCE DATA (India / LMIC) ============================ */
 /* Indicative reference values with sources. Costs & disability weights are
    STARTING POINTS — users must confirm the current figure from the cited source. */
@@ -976,7 +1105,8 @@ function route(mod){
     evaluation:()=>{renderEvalSidebar();renderEval();},
     modeling:()=>{renderModelSidebar();renderModel();},
     sensitivity:()=>{renderSensSidebar();renderSens();},
-    bia:()=>{renderBiaSidebar();renderBia();}})[mod]();
+    bia:()=>{renderBiaSidebar();renderBia();},
+    vb:()=>{renderVbSidebar();renderVb();}})[mod]();
   saveLocal();
 }
 document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));
