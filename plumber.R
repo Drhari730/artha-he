@@ -26,6 +26,7 @@ function(res) {
   res$setHeader("Access-Control-Allow-Origin", "*")
   res$setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
   res$setHeader("Access-Control-Allow-Headers", "Content-Type")
+  res$setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
   plumber::forward()
 }
 
