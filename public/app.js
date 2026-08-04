@@ -834,7 +834,8 @@ async function renderBia(){
 
 /* ============================ PERSISTENCE ============================ */
 function saveLocal(){try{localStorage.setItem("arthaHE_v2",JSON.stringify(state));}catch(e){}}
-function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
+function deepMerge(target,src){if(src===null||src===undefined)return target;if(Array.isArray(target))return Array.isArray(src)?src:target;if(typeof target==="object"){if(typeof src!=="object"||Array.isArray(src))return target;for(const k in src){if(k in target&&target[k]&&typeof target[k]==="object"&&!Array.isArray(target[k])){deepMerge(target[k],src[k]);}else{target[k]=src[k];}}return target;}return src===undefined?target:src;}
+function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
 function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
 function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
 
@@ -991,7 +992,7 @@ function renderVbSidebar(){
       <div class="btn-row"><button class="btn btn-secondary sm" id="uAdd">+ Add</button></div>
       <div class="divider"></div><button class="btn btn-primary btn-block" id="uGo">Compute utility</button>`;
   } else if(v.tool==="ly"){
-    const l=v.ly;
+    const l=v.ly||(v.ly={mode:"median",median:0,rate:0,survPct:0,survT:5,horizon:30,discount:0.03,util:0});
     body=`<p class="hint">Turn a survival summary — a <b>median</b>, a <b>hazard rate</b>, or a <b>survival %</b> — into <b>mean life-years</b> (and QALYs if you add a utility). This assumes a constant hazard (exponential survival); see the notes on when to fit richer survival models.</p>
       <div class="seg" id="lyMode"><button data-m="median" class="${l.mode==="median"?"active":""}">Median</button><button data-m="rate" class="${l.mode==="rate"?"active":""}">Hazard rate</button><button data-m="survPct" class="${l.mode==="survPct"?"active":""}">Survival %</button></div>
       ${l.mode==="median"?`<div class="field"><label>Median survival (years)</label><input type="number" id="lMedian" step="0.1" value="${l.median}"></div>`:""}
