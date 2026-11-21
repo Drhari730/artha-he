@@ -14,7 +14,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 # so these versions are fixed by the image tag above.
 RUN R -e "install.packages(c('plumber', 'jsonlite', 'testthat'))"
 
-COPY engine.R engine_survival.R engine_models.R plumber.R run.R /app/
+COPY engine.R engine_survival.R engine_models.R engine_analysis.R plumber.R run.R /app/
 COPY tests /app/tests
 COPY validation /app/validation
 COPY public /app/public

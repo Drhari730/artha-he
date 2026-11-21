@@ -20,7 +20,8 @@ for the **Indian / LMIC** context (GDP-based WTP thresholds, DALYs, ₹, 3% disc
 | **Evaluation** | CMA · CEA · CUA · CBA · CCA, with a built-in **advisor** that recommends the right method and lists missing data; ICER, dominance, net benefit, CE plane |
 | **Survival** | Fit exponential, Weibull, Gompertz, log-logistic and log-normal curves (maximum likelihood, AIC/BIC) to patient-level data, or to a **published Kaplan-Meier curve** rebuilt with the Guyot et al. (2012) algorithm; extrapolate, and send the chosen curve to the model |
 | **Modeling** | Three model types: **Markov** (any states, matrices or treatment effects), **partitioned survival** (OS/PFS curves or hazard ratios, as in oncology HTA) and **decision trees** (screening, diagnostics, acute care); QALYs and DALYs |
-| **Sensitivity** | Probabilistic SA for every model type (Gamma / Beta / Dirichlet / multivariate-normal curve parameters / lognormal hazard ratios), CEAC for all strategies with the acceptability frontier, EVPI by threshold, one-way tornado |
+| **Sensitivity** | Probabilistic SA for every model type (Gamma / Beta / Dirichlet / multivariate-normal curve parameters / lognormal hazard ratios), CEAC for all strategies with the acceptability frontier, EVPI by threshold, **EVPPI** (which parameters are worth researching) and **population EVPI**, one-way tornado, and a **scenario manager** (standard HTA scenarios generated automatically, your own saved scenarios, alternative survival extrapolations) |
+| **Reference library** | Your own editable, shareable library: GDP per capita, a CPI series (price-year conversion by index), life tables, unit costs and utilities, each with its source and a **verified** flag; one click sends a value into the analysis, and the report lists every value used and whether it was verified |
 | **Budget Impact** | Multi-year annual & cumulative budget impact |
 | **Methods** | Every formula on display + a live engine-validation panel + glossary |
 
@@ -65,7 +66,7 @@ Rscript tests/run_tests.R
 Rscript validation/validate_darth.R
 ```
 
-The engine **reproduces the published DARTH Sick-Sicker base case** (all four strategies; costs to the dollar, QALYs to two decimals, the same ICERs). The `testthat` suite covers survival fitting (checked against R `survival::survreg` / `survfit`, and a Guyot round-trip), the partitioned survival model and decision trees (against independent calculations), multi-strategy CEAC/CEAF/EVPI, the Markov engine (DARTH, closed-form checks, Simpson weights, treatment effects, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
+The engine **reproduces the published DARTH Sick-Sicker base case** (all four strategies; costs to the dollar, QALYs to two decimals, the same ICERs). The `testthat` suite covers survival fitting (checked against R `survival::survreg` / `survfit`, and a Guyot round-trip), the partitioned survival model and decision trees (against independent calculations), multi-strategy CEAC/CEAF/EVPI, EVPPI (against analytic values), CPI conversion and scenarios, the Markov engine (DARTH, closed-form checks, Simpson weights, treatment effects, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
 
 ## Deploy (Railway)
 
@@ -80,9 +81,11 @@ The repo deploys with the `Dockerfile` (pinned `rocker/r-ver:4.4.1`):
 engine.R            # calculation engine (pure R): costing, Markov, PSA, DSA, BIA
 engine_survival.R   # survival fitting, Kaplan-Meier, Guyot reconstruction
 engine_models.R     # partitioned survival, decision trees, multi-strategy PSA
+engine_analysis.R   # EVPPI, population EVPI, scenario analysis
 plumber.R           # JSON API + report builder
 run.R               # starts the server (error handling, request-size limit)
-public/             # front end: index.html, app.js
+public/             # front end: index.html, app.js (core), models.js (survival, PSM, trees),
+                    #   library.js (reference library, scenarios), flow.js (guided flow, CHEERS)
 tests/              # testthat suite (tests/run_tests.R)
 validation/         # DARTH validation script + VALIDATION.md
 Dockerfile          # pinned R image; runs the tests at build time

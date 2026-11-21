@@ -81,16 +81,40 @@ byCategory <- function(items, amountOf, total) {
   Filter(Negate(is.null), out)
 }
 
-microCost <- function(rows, ty, infl) {
-  if (is.null(rows) || length(rows) == 0) return(list(lines = list(), total = 0, byCat = list()))
+# Price index lookup: cpi = list(list(year=, index=), ...). Returns NULL when absent.
+cpi_table <- function(cpi) {
+  if (is.null(cpi) || length(cpi) == 0) return(NULL)
+  y <- vapply(cpi, function(r) num(r$year, NA), numeric(1)); v <- vapply(cpi, function(r) num(r$index, NA), numeric(1))
+  ok <- !is.na(y) & !is.na(v) & v > 0
+  if (!any(ok)) return(NULL)
+  stats::setNames(v[ok], as.character(y[ok]))
+}
+# Convert a cost from price year fy to ty: by the CPI ratio when both years are
+# in the index, otherwise by the constant annual rate.
+price_convert <- function(c, fy, ty, r, cpi = NULL) {
+  if (!is.null(cpi) && !is.na(fy) && !is.na(ty)) {
+    a <- cpi[as.character(fy)]; b <- cpi[as.character(ty)]
+    if (!is.na(a) && !is.na(b)) return(c * b / a)
+  }
+  inflate_cost(c, fy, ty, r)
+}
+
+microCost <- function(rows, ty, infl, cpi = NULL) {
+  if (is.null(rows) || length(rows) == 0) return(list(lines = list(), total = 0, byCat = list(), cpiUsed = 0))
+  cpi <- cpi_table(cpi)
+  used <- 0
   lines <- lapply(rows, function(r) {
-    u <- inflate_cost(num(r$unit_cost), num(r$year, NA), ty, num(infl))
+    fy <- num(r$year, NA)
+    viaCpi <- !is.null(cpi) && !is.na(fy) && !is.na(ty) && !is.na(cpi[as.character(fy)]) && !is.na(cpi[as.character(ty)])
+    if (viaCpi && fy != ty) used <<- used + 1
+    r$priceMethod <- if (viaCpi) "CPI" else "rate"
+    u <- price_convert(num(r$unit_cost), fy, ty, num(infl), cpi)
     r$unit_cost_adj <- u
     r$line_cost <- num(r$quantity) * u
     r
   })
   total <- sumv(lines, function(l) l$line_cost)
-  list(lines = lines, total = total, byCat = byCategory(lines, function(l) l$line_cost, total))
+  list(lines = lines, total = total, byCat = byCategory(lines, function(l) l$line_cost, total), cpiUsed = used)
 }
 
 annualisationFactor <- function(d, L) {
@@ -559,10 +583,12 @@ psaDraw <- function(m, cv, mode, params) {
     mm$strategies[[k]]$matrix <- newP
   }
   # A large sampled effect can make a row invalid; cap it rather than fail the run.
-  tryCatch(resolve_effects(mm, effVals), input_error = function(e) {
+  out <- tryCatch(resolve_effects(mm, effVals), input_error = function(e) {
     for (k in which(!is.na(effVals))) effVals[k] <- num(m$strategies[[k]]$effect$value)
     resolve_effects(mm, effVals)
   })
+  out$.eff <- effVals
+  out
 }
 
 psaModel <- function(m, N, iRef, iCmp, cv, mode, params, seed = NULL) {
@@ -703,5 +729,5 @@ biaRun <- function(b) {
   for (i in rev(seq_len(sys.nframe()))) { f <- sys.frame(i)$ofile; if (!is.null(f)) return(dirname(f)) }
   "."
 })()
-for (.f in c("engine_survival.R", "engine_models.R")) source(file.path(.engine_dir, .f), local = environment())
+for (.f in c("engine_survival.R", "engine_models.R", "engine_analysis.R")) source(file.path(.engine_dir, .f), local = environment())
 rm(.f)

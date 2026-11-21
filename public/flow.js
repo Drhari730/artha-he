@@ -143,6 +143,9 @@ function flowChecks(){
   }
   const c=state.costing;if(c&&c.method==="micro"&&(c.rows||[]).length&&+c.toYear<new Date().getFullYear()-1)info(`Costs are in ${c.toYear} prices. Update the price year if you need current prices.`,"costing");
   if(ran("bia")&&full&&ran("modeling")&&!(state.provenance&&Object.keys(state.provenance).some(k=>k.startsWith("bia")))) info("Check that the budget-impact costs per patient match the costs used in your model.","bia");
+  const unv=Object.values(state.refUsedMap||{}).filter(x=>!/^Verified/.test(x.status));
+  if(unv.length)warn(`${unv.length} reference value(s) used in the analysis are not yet verified (e.g. ${escHTML(unv[0].item)}). Check them against the source in the Reference library.`,"reference");
+  if(full&&ran("sensitivity")&&!ran("scenarios")&&modelKind()!=="tree")info("Scenario analysis has not been run. Add it in Sensitivity → Scenarios to test discounting, horizon and extrapolation choices.","sensitivity");
   if(!p.funding||!p.conflicts)info("Add the funding source and conflicts of interest (CHEERS items 27–28) under “Reporting details”.","project");
   return out;
 }
@@ -175,7 +178,7 @@ function cheersItems(){
     ["Analytics and assumptions",full&&m.type==="psm"?runOr("modeling",`${mm} within-cycle correction; survival curves ${m.strategies.some(s=>s.os&&s.os.dist)?"fitted by maximum likelihood (exponential, Weibull, Gompertz, log-logistic, log-normal; chosen on AIC/BIC and plausibility)":"entered from published sources"}; treatment effects as hazard ratios where used; PFS capped at OS.`,"Run the model"):full&&m.type==="tree"?runOr("modeling","Expected values by rolling back the tree; costs and outcomes accumulate along each path.","Run the model"):full?runOr("modeling",`${mm} within-cycle correction; ${m.bgMortality?"age-specific background mortality":"no background mortality"}; ${m.strategies.some(s=>s.effect)?"treatment effects applied as ratios to the baseline matrix":"strategy-specific transition matrices"}.`,"Run the model"):{s:"you",x:"Describe the analytical methods and assumptions."}],
     ["Characterizing heterogeneity",p.heterogeneity?{s:"auto",x:p.heterogeneity}:{s:"you",x:"Describe subgroup analyses, or state none were done."}],
     ["Characterizing distributional effects",p.distributional?{s:"auto",x:p.distributional}:ran("oop")?{s:"partial",x:"Out-of-pocket and catastrophic expenditure analysed; describe equity implications."}:{s:"you",x:"Describe effects across population groups, or state none."}],
-    ["Characterizing uncertainty",ran("sensitivity")?{s:"auto",x:`Probabilistic SA (${state.sens.N} iterations, seed ${state.sens.seed}) and one-way SA (tornado).`}:{s:"missing",x:"Run the sensitivity analysis"}],
+    ["Characterizing uncertainty",ran("sensitivity")?{s:"auto",x:`Probabilistic SA (${state.sens.N} iterations, seed ${state.sens.seed}), one-way SA (tornado), value of information (EVPI, EVPPI)${ran("scenarios")?" and scenario analysis":""}.`}:{s:"missing",x:"Run the sensitivity analysis"}],
     ["Approach to engagement with patients and others affected",p.engagement?{s:"auto",x:p.engagement}:{s:"you",x:"Describe engagement, or state there was none."}],
     ["Study parameters",full&&ran("modeling")?{s:"partial",x:"States, costs, utilities and transitions are listed in the report; add the source of each."}:{s:"you",x:"Tabulate all inputs with their sources and distributions."}],
     ["Summary of main results",(ran("modeling")||ran("evaluation"))?{s:"auto",x:"Costs, outcomes, incremental results and ICERs are in the report."}:{s:"missing",x:"Run the evaluation or the model"}],
@@ -287,6 +290,8 @@ function reportPayload(){
   return Object.assign({},state,{
     project:Object.assign({},p,{outcomeLabel:OUTCOMES[p.outcome]?OUTCOMES[p.outcome].label:"",perspectiveLabel:PERSPECTIVES[p.perspective]||"",method:projMethod()||"",refCaseLabel:REF_CASES[p.refCase]?REF_CASES[p.refCase].label:""}),
     model:activeModel(),
+    scenarioSet:typeof scenarioPayload==="function"?scenarioPayload():null,
+    refUsed:Object.values(state.refUsedMap||{}),
     cheers:cheersItems().map(x=>({n:x.n,topic:x.topic,status:CH_TAG[x.status][1],text:x.text})),
     provenanceList:Object.values(state.provenance||{}).map(v=>({target:v.target,from:v.from,at:(v.at||"").slice(0,10)}))
   });

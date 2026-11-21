@@ -76,8 +76,8 @@ function(req) {
   if (!is.null(c$method) && c$method == "advanced") {
     return(advancedCost(c$adv))
   }
-  r <- microCost(c$rows, as.numeric(c$toYear), as.numeric(c$inflation))
-  list(method = "micro", total = r$total, byCat = r$byCat, lines = r$lines, toYear = as.numeric(c$toYear), inflation = as.numeric(c$inflation))
+  r <- microCost(c$rows, num(c$toYear, NA), num(c$inflation), if (isTRUE(as.logical(c$useCpi))) c$cpi else NULL)
+  list(method = "micro", total = r$total, byCat = r$byCat, lines = r$lines, toYear = num(c$toYear, NA), inflation = num(c$inflation), cpiUsed = r$cpiUsed)
 }
 
 #* @serializer unboxedJSON
@@ -207,7 +207,7 @@ function(req) {
   seed <- as.integer(num(p$seed, DEFAULT_SEED))
 
   mode <- if (model_type(p$model) == "markov") p[["mode"]] else "global"
-  P <- psaAll(p$model, N, cv, mode, p[["params"]], seed = seed)
+  P <- psaAll(p$model, N, cv, mode, p[["params"]], seed = seed, record = TRUE)
   draws <- lapply(seq_len(nrow(P$C)), function(i) list(incCost = P$C[i, iCmp + 1] - P$C[i, iRef + 1], incEff = P$E[i, iCmp + 1] - P$E[i, iRef + 1]))
   hiW <- max(1000000, 3 * wtp)
   ws <- seq(0, hiW, length.out = 41)
@@ -217,8 +217,26 @@ function(req) {
   ev <- evpi(draws, wtp)
   tor <- dsaModel(p$model, wtp, iRef, iCmp, if (identical(mode, "per_parameter")) p[["params"]] else NULL)
   evM <- ceac_multi(P, wtp)$evpi[[1]]$evpi
+  NBw <- P$E * wtp - P$C
+  ev_pp <- evppi_all(NBw, P$params)
+  if (length(ev_pp) > 15) ev_pp <- ev_pp[1:15]
+  popF <- population_factor(p$popPerYear, p$popYears, if (is.null(p$popRate)) 0.03 else num(p$popRate))
 
-  list(pCE = pCE, evpi = ev, evpiAll = evM, ceac = curve, ceacMulti = multi$curves, ceaf = multi$frontier, evpiCurve = multi$evpi, mode = mode, nStrategies = ncol(P$C), draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, seed = seed, unit = if(identical(p$model$outcome, "DALY")) "DALY averted" else "QALY", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
+  list(pCE = pCE, evpi = ev, evpiAll = evM, evppi = ev_pp, popFactor = popF, popEvpi = evM * popF, ceac = curve, ceacMulti = multi$curves, ceaf = multi$frontier, evpiCurve = multi$evpi, mode = mode, nStrategies = ncol(P$C), draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, seed = seed, unit = if(identical(p$model$outcome, "DALY")) "DALY averted" else "QALY", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
+}
+
+#* @serializer unboxedJSON
+#* @options /api/scenarios
+#* @post /api/scenarios
+function(req) {
+  p <- parse_req(req)
+  if (is.null(p$base)) input_error("No base-case model supplied.")
+  sc <- c(list(list(name = "Base case", model = p$base)),
+          if (isTRUE(as.logical(p$includeStandard))) standard_scenarios(p$base) else list(),
+          if (length(p$scenarios)) p$scenarios else list())
+  ref <- as.integer(num(p$ref, 0)); cmp <- as.integer(num(p$cmp, 1))
+  list(results = run_scenarios(sc, num(p$wtp), ref, cmp), wtp = num(p$wtp),
+       unit = if (identical(p$base$outcome, "DALY")) "DALY averted" else "QALY")
 }
 
 #* @serializer unboxedJSON
@@ -285,8 +303,8 @@ function(req) {
       ac <- advancedCost(cst$adv)
       paste0("<p>Advanced (activity-based) costing. <b>Total: ", fmtINR(ac$total), "</b> (", fmtINR(ac$perUnit), " per unit).</p>", tbl(c("Component","Amount","Share"), lapply(ac$breakdown, function(x) c(x$component, fmtINR(x$amount), pct(x$share)))))
     } else {
-      r <- microCost(cst$rows, num(cst$toYear, NA), num(cst$inflation))
-      paste0("<p>Micro (bottom-up) costing, ", esc(cst$toYear), " prices. <b>Total cost: ", fmtINR(r$total), "</b>.</p>", tbl(c("Category","Cost","Share"), lapply(r$byCat, function(x) c(x$category, fmtINR(x$cost), pct(x$share)))))
+      r <- microCost(cst$rows, num(cst$toYear, NA), num(cst$inflation), if (isTRUE(as.logical(cst$useCpi))) cst$cpi else NULL)
+      paste0("<p>Micro (bottom-up) costing, ", esc(cst$toYear), " prices", if (r$cpiUsed > 0) paste0(" (", r$cpiUsed, " line(s) converted with the consumer price index)") else paste0(" (inflated at ", pct(num(cst$inflation)), " per year)"), ". <b>Total cost: ", fmtINR(r$total), "</b>.</p>", tbl(c("Category","Cost","Share"), lapply(r$byCat, function(x) c(x$category, fmtINR(x$cost), pct(x$share)))))
     }
   }))
 
@@ -346,19 +364,40 @@ function(req) {
     pr <- tryCatch(pick_pair(st$sens$ref, st$sens$cmp, length(m$strategies)), error = function(e) c(0L, 1L))
     wtp <- num(st$sens$wtp); cvv <- if(num(st$sens$cv) > 0) num(st$sens$cv) else 0.2
     nIt <- as.integer(min(max(num(st$sens$N, 1000), 1), 2000)); seed <- as.integer(num(st$sens$seed, DEFAULT_SEED))
-    draws <- psaModel(m, nIt, pr[1], pr[2], cvv, st$sens[["mode"]], st$sens[["params"]], seed = seed)
+    P <- psaAll(m, nIt, cvv, if (model_type(m) == "markov") st$sens[["mode"]] else "global", st$sens[["params"]], seed = seed, record = TRUE)
+    draws <- lapply(seq_len(nrow(P$C)), function(i) list(incCost = P$C[i, pr[2] + 1] - P$C[i, pr[1] + 1], incEff = P$E[i, pr[2] + 1] - P$E[i, pr[1] + 1]))
     pCE <- mean(vapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0, logical(1)))
     ev <- evpi(draws, wtp)
+    NBw <- P$E * wtp - P$C
+    evAll <- mean(apply(NBw, 1, max)) - max(colMeans(NBw))
+    popF <- population_factor(st$sens$popPerYear, st$sens$popYears, 0.03)
+    evpp <- evppi_all(NBw, P$params); if (length(evpp) > 8) evpp <- evpp[1:8]
     tor <- dsaModel(m, wtp, pr[1], pr[2], if (identical(st$sens[["mode"]], "per_parameter") && model_type(m) == "markov") st$sens[["params"]] else NULL)
     paste0("<p>Probabilistic sensitivity analysis (", nIt, " iterations, seed ", seed, "). Probability cost-effective at ", fmtINR(wtp), ": <b>", pct(pCE), "</b>. EVPI per patient: <b>", fmtINR(ev), "</b>.</p>",
+           "<p>Expected value of perfect information (all strategies): <b>", fmtINR(evAll), "</b> per patient", if (popF > 0) paste0("; <b>", fmtINR(evAll * popF), "</b> for the population affected (", fmtNum(num(st$sens$popPerYear), 0), " patients a year for ", fmtNum(num(st$sens$popYears), 0), " years, discounted at 3%)") else "", ".</p>",
+           if (length(evpp)) paste0("<p>Expected value of partial perfect information (EVPPI, per patient; non-parametric regression):</p>",
+             tbl(c("Parameter", "EVPPI per patient", if (popF > 0) "Population EVPPI" else NULL), lapply(evpp, function(e) c(e$parameter, fmtINR(e$evppi), if (popF > 0) fmtINR(e$evppi * popF) else NULL)))) else "",
            if (length(tor)) paste0("<p>One-way sensitivity analysis (net monetary benefit at ", fmtINR(wtp), "):</p>",
              tbl(c("Parameter","Range","Source","NMB at low","NMB at high"), lapply(tor, function(t) c(t$label, paste0(fmtNum(t$loVal, 3), " - ", fmtNum(t$hiVal, 3)), t$source, fmtINR(t$nmbAtLo), fmtINR(t$nmbAtHi))))) else "")
+  }))
+
+  if (include("scenarios") && length(st$scenarioSet$base)) add("Scenario analysis", safe({
+    ss <- st$scenarioSet
+    sc <- c(list(list(name = "Base case", model = ss$base)), if (isTRUE(as.logical(ss$includeStandard))) standard_scenarios(ss$base) else list(), if (length(ss$scenarios)) ss$scenarios else list())
+    rr <- run_scenarios(sc, num(ss$wtp), as.integer(num(ss$ref, 0)), as.integer(num(ss$cmp, 1)))
+    ok <- Filter(function(x) isTRUE(x$ok), rr)
+    paste0("<p>", if (length(ok)) paste0(esc(ok[[1]]$cmpName), " vs ", esc(ok[[1]]$refName), ", willingness-to-pay ", fmtINR(num(ss$wtp)), ".") else "", "</p>",
+           tbl(c("Scenario", "Incremental cost", "Incremental effect", "ICER", "Optimal strategy"),
+               lapply(rr, function(x) if (isTRUE(x$ok)) c(x$name, fmtINR(x$incCost), fmtNum(x$incEff, 3), if (is.na(x$icer)) "-" else fmtINR(x$icer), x$best) else c(x$name, "-", "-", "-", paste0("could not run: ", x$error)))))
   }))
 
   if (include("bia")) add("Budget impact", safe({
     br <- biaRun(st$bia)
     paste0("<p>Budget impact over ", esc(st$bia$horizon), " years. Cumulative net impact: <b>", fmtINR(br[[length(br)]]$cum), "</b>.</p>", tbl(c("Year","Uptake","Net impact","Cumulative"), lapply(br, function(r) c(r$year, pct(r$uptake), fmtINR(r$impact), fmtINR(r$cum)))))
   }))
+
+  if (length(st$refUsed)) add("Reference data used", paste0("<p>Values taken from the reference-data library.</p>",
+    tbl(c("Item", "Value", "Source", "Status"), lapply(st$refUsed, function(x) c(x$item, x$value, x$source, x$status)))))
 
   if (length(st$provenanceList)) add("Where the inputs came from", paste0("<p>Values sent between analyses inside Artha HE.</p>",
     tbl(c("Input","Came from","Date"), lapply(st$provenanceList, function(x) c(x$target, x$from, x$at)))))

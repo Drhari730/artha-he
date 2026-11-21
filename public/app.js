@@ -462,9 +462,10 @@ function renderCostingSidebar(){
       <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit ₹</th><th>Yr</th><th></th></tr></thead><tbody id="costRows">${rows}</tbody></table></div>
       <div class="btn-row"><button class="btn btn-secondary sm" id="addRow">+ Add item</button><button class="btn btn-ghost sm" id="clearRows">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="csvFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplCost">Template</button></div>
       <div class="field"><label>Add from reference library <span style="float:right;font-weight:400;text-transform:none;color:var(--muted-light)">indicative ₹</span></label>
-        <select id="refPick"><option value="">— insert an indicative unit cost —</option>${REFDATA.unitCosts.map((u,i)=>`<option value="${i}">${u.item} · ₹${u.value}/${u.unit}</option>`).join("")}</select></div>
+        <select id="refPick"><option value="">— insert a unit cost from your library —</option>${refLib().unitCosts.map((u,i)=>`<option value="${i}">${escHTML(u.item)} · ₹${u.value}/${escHTML(u.unit||"unit")}${u.verified?" ✓":""}</option>`).join("")}</select></div>
       <div class="field"><label>Express all costs in price year</label><input type="number" id="toYear" value="${c.toYear}"></div>
-      <div class="field"><label>Annual inflation <span class="lab-val" id="inflLab">${pct(c.inflation)}</span></label><input type="range" id="infl" min="0" max="15" step="0.5" value="${c.inflation*100}"></div></div>
+      ${refLib().cpi.rows.length>=2?`<label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12.5px;margin:0 0 10px"><input type="checkbox" id="useCpi" ${c.useCpi?"checked":""} style="width:auto">Convert price years with the CPI series in your reference library (${refLib().cpi.rows.length} years, ${refLib().cpi.verified?"verified":"not yet verified"})</label>`:`<p class="hint" style="margin-top:-4px">Tip: add a consumer price index series in the Reference library to convert by index instead of a flat rate.</p>`}
+      <div class="field"><label>${c.useCpi?"Fallback annual inflation (years outside the CPI series)":"Annual inflation"} <span class="lab-val" id="inflLab">${pct(c.inflation)}</span></label><input type="range" id="infl" min="0" max="15" step="0.5" value="${c.inflation*100}"></div></div>
     <div id="grossC" style="display:${c.method==="gross"?"block":"none"}">
       <div class="field"><label>Total cost of the service (₹)</label><input type="number" id="totalCost" value="${c.totalCost}"></div>
       <div class="field"><label>Output units (patients, visits…)</label><input type="number" id="output" value="${c.output}"></div></div>
@@ -479,7 +480,8 @@ function renderCostingSidebar(){
   const tc=document.getElementById("totalCost");if(tc)tc.onchange=()=>c.totalCost=+tc.value;
   const op=document.getElementById("output");if(op)op.onchange=()=>c.output=+op.value;
   const tpl=document.getElementById("tplCost");if(tpl)tpl.onclick=()=>dlTemplate("costing");
-  const rp=document.getElementById("refPick");if(rp)rp.onchange=()=>{const u=REFDATA.unitCosts[+rp.value];if(!u)return;c.rows.push({item:u.item,category:u.category,quantity:1,unit_cost:u.value,year:c.toYear});renderCostingSidebar();renderCosting();};
+  const rp=document.getElementById("refPick");if(rp)rp.onchange=()=>{const u=refLib().unitCosts[+rp.value];if(!u)return;c.rows.push({item:u.item,category:u.category||"Direct medical",quantity:1,unit_cost:u.value,year:u.year||c.toYear});noteRefUse("Unit cost: "+u.item,fmtINR(u.value)+(u.unit?" "+u.unit:""),u.source,u.verified);renderCostingSidebar();renderCosting();};
+  const uc=document.getElementById("useCpi");if(uc)uc.onchange=()=>{c.useCpi=uc.checked;renderCostingSidebar();renderCosting();};
   if(c.method==="advanced"){wireAdvGrids();
     const ad=document.getElementById("advDisc");if(ad)ad.onchange=()=>c.adv.discount=+ad.value;
     const mh=document.getElementById("advMH");if(mh)mh.onchange=()=>c.adv.monthlyHours=+mh.value;
@@ -494,6 +496,7 @@ async function renderCosting(){
   if(c.method==="advanced"&&!(c.adv.staff.length||c.adv.equip.length||c.adv.consum.length||c.adv.space.length))return emptyState("Costing","Add staff, equipment, consumables or space entries in the panel on the left — or load an example — then Calculate.");
   if(c.method==="gross"&&!(+c.output>0))return emptyState("Costing","Enter the total cost of the service and the number of output units, then Calculate.");
   wsBusy("Costing");
+  c.cpi=c.useCpi?refLib().cpi.rows:null;
   let res;try{res=await api("costing",c);}catch(e){return wsError(e);}
   markRun("costing");
   if(res.method==="gross"){const per=res.per;
@@ -527,7 +530,7 @@ async function renderCosting(){
     return;}
   const bars=res.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
   const lr=res.lines.map(l=>`<tr><td>${l.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${l.category}</td><td>${fmtNum(l.quantity,0)}</td><td>${fmtINR(l.unit_cost_adj,0)}</td><td>${fmtINR(l.line_cost,0)}</td></tr>`).join("");
-  ws.innerHTML=`<div class="ws-head"><div><h2>Micro costing</h2><div class="sub">Bottom-up: quantity × unit cost, inflated to ${c.toYear} prices (${pct(c.inflation)}/yr).</div></div>${EXPORT_BAR}</div>
+  ws.innerHTML=`<div class="ws-head"><div><h2>Micro costing</h2><div class="sub">Bottom-up: quantity × unit cost, in ${c.toYear} prices (${res.cpiUsed?`${res.cpiUsed} line(s) converted by the consumer price index; others at ${pct(c.inflation)}/yr`:`inflated at ${pct(c.inflation)}/yr`}).</div></div>${EXPORT_BAR}</div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi"><div class="k-label">Cost lines</div><div class="k-val mono">${res.lines.length}</div></div><div class="kpi"><div class="k-label">Categories</div><div class="k-val mono">${res.byCat.length}</div></div></div>
     <div class="result-tabs" id="costTabs"><button class="result-tab active" data-p="cat">By category</button><button class="result-tab" data-p="lines">Cost lines</button></div>
     <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>Cost by category</h3><div class="card-sub">Share of total across perspective categories.</div>${barChartH(bars)}</div></div></div>
@@ -849,7 +852,11 @@ function renderSensSidebar(){
     gridHtml = `<div class="sublabel" style="margin-top:12px;margin-bottom:4px">Per-parameter distributions</div><div class="grid-wrap" style="max-height:220px;overflow-y:auto;margin-bottom:12px"><table class="data-grid" style="table-layout:fixed"><thead><tr><th style="width:40%">Param</th><th style="width:25%">Dist</th><th style="width:20%">Mean</th><th style="width:15%">SE / N</th></tr></thead><tbody id="paramRows">${rows}</tbody></table></div>`;
   }
 
+  if(s.view==="scenarios"){document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">05</span> Sensitivity</h2>
+    <div class="seg" id="sView" style="margin-bottom:12px"><button data-v="psa">Probabilistic &amp; one-way</button><button data-v="scenarios" class="active">Scenarios</button></div>${renderScenarioSidebar()}`;
+    document.querySelectorAll("#sView button").forEach(b=>b.onclick=()=>{s.view=b.dataset.v;renderSensSidebar();renderSens();});wireScenarioSidebar();return;}
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">05</span> Sensitivity</h2>
+    <div class="seg" id="sView" style="margin-bottom:12px"><button data-v="psa" class="active">Probabilistic &amp; one-way</button><button data-v="scenarios">Scenarios</button></div>
     <p class="hint">How robust is the model's conclusion to uncertainty — deterministic (tornado) and probabilistic (PSA → CEAC, EVPI).</p>
     <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
     ${isMk?"":`<p class="hint">${m.type==="psm"?"Partitioned survival":"Decision tree"} model: costs (Gamma), utilities (Beta), ${m.type==="psm"?"survival-curve parameters (multivariate normal from the fit) and hazard ratios (lognormal from their 95% CI)":"branch probabilities (Beta, rebalanced to sum to 1)"} are sampled at the CV you choose.</p>`}
@@ -859,6 +866,8 @@ function renderSensSidebar(){
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
     <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="${wtpMax()}" step="25000" value="${s.wtp}"></div>
     ${gdpField()}
+    <div class="sublabel">Population (for population EVPI)</div>
+    <div class="field two"><div><label>Patients affected per year</label><input type="number" id="popPerYear" value="${s.popPerYear||""}" placeholder="e.g. 50000"></div><div><label>Years the decision applies</label><input type="number" id="popYears" value="${s.popYears||""}" placeholder="e.g. 10"></div></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
 
   document.getElementById("sRef").value=Math.min(s.ref,m.strategies.length-1);
@@ -883,24 +892,29 @@ function renderSensSidebar(){
     });
   }
   document.getElementById("runSens").onclick=renderSens;wireGdp();
+  document.querySelectorAll("#sView button").forEach(b=>b.onclick=()=>{s.view=b.dataset.v;renderSensSidebar();renderSens();});
+  ["popPerYear","popYears"].forEach(k=>{const el=document.getElementById(k);if(el)el.onchange=()=>s[k]=el.value===""?"":+el.value;});
 }
 async function renderSens(){
+  if(state.sens.view==="scenarios")return renderScenarios();
   const s=state.sens,m=activeModel(),ws=document.getElementById("workspace");
   if(!modelReady(m))return emptyState("Sensitivity analysis","This runs on your model (Markov, partitioned survival or decision tree). First set it up in the Modeling tab (or load an example there), then come back and Run analysis.");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
-  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed});}catch(e){return wsError(e);}
+  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed,popPerYear:s.popPerYear,popYears:s.popYears});}catch(e){return wsError(e);}
   markRun("sensitivity");
   const unit=R.unit;
   const desc = m.type!=="markov" ? `Costs, utilities${m.type==="psm"?", survival-curve parameters and hazard ratios":" and branch probabilities"} sampled (CV ${pct(R.cv,0)}).` : s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)}: Gamma costs (state and treatment), Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept); treatment effects lognormal from their 95% CI.`;
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div><div class="k-sub">seed ${R.seed}</div></div></div>
-      <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button>${R.nStrategies>2?'<button class="result-tab" data-p="multi">All strategies</button>':""}<button class="result-tab" data-p="evpi">EVPI by threshold</button></div>
+      <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button>${R.nStrategies>2?'<button class="result-tab" data-p="multi">All strategies</button>':""}<button class="result-tab" data-p="evpi">EVPI by threshold</button><button class="result-tab" data-p="evppi">EVPPI</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
       <div class="pane" data-pane="scatter"><div class="card flush"><div class="pad"><h3>PSA on the CE plane</h3><div class="card-sub">Each point = one Monte-Carlo draw. Purple = cost-effective at current WTP.</div>${scatterPSA(R.draws,R.wtp)}</div></div></div>
       <div class="pane" data-pane="tor"><div class="card flush"><div class="pad"><h3>One-way sensitivity — tornado</h3><div class="card-sub">Net monetary benefit as each parameter moves to the low (amber) and high (purple) end of its range. Ranges come from your per-parameter distributions (95% interval), each treatment effect's 95% CI and 0–5% discounting; others are an assumed ±30% (costs) or ±0.1 (utilities), as labelled.</div>${tornado(R.tornado)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.amber}"></span>Low value</div><div class="item"><span class="sw" style="background:${C.primary}"></span>High value</div></div></div></div>`;
   const wsS=document.getElementById("workspace");
   wsS.querySelector('[data-pane="tor"]').insertAdjacentHTML("afterend",(R.nStrategies>2?`<div class="pane" data-pane="multi"><div class="card flush"><div class="pad"><h3>Acceptability curves: all ${R.nStrategies} strategies</h3><div class="card-sub">Probability each strategy has the highest net benefit. Circles mark the acceptability frontier: the strategy with the highest <i>expected</i> net benefit at each threshold.</div>${ceacMultiChart(R.ceacMulti,R.ceaf)}</div><div class="legend">${R.ceacMulti.map((c,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${escHTML(c.name)}</div>`).join("")}<div class="item"><span class="sw" style="background:transparent;border:1.5px solid ${C.ink};border-radius:50%"></span>Frontier</div></div></div></div>`:"")+
-    `<div class="pane" data-pane="evpi"><div class="card flush"><div class="pad"><h3>Expected value of perfect information</h3><div class="card-sub">Per patient, across thresholds, for the decision between all ${R.nStrategies} strategies. At ${compactINR(R.wtp)}: <b>${compactINR(R.evpiAll)}</b> per patient; multiply by the number of patients affected to judge whether more research is worthwhile.</div>${evpiChart(R.evpiCurve)}</div></div></div>`);
+    `<div class="pane" data-pane="evppi"><div class="card flush"><div class="pad"><h3>Expected value of partial perfect information (EVPPI)</h3><div class="card-sub">How much it is worth (per patient${R.popFactor>0?", and for the whole population":""}) to remove the uncertainty in each parameter at ${compactINR(R.wtp)} per ${unit}: where further research would pay off most. Non-parametric regression method (Strong, Oakley &amp; Brennan, 2014).</div>${R.evppi&&R.evppi.length?barChartH(R.evppi.slice(0,10).map((e,i)=>({label:e.parameter.length>26?e.parameter.slice(0,25)+"…":e.parameter,value:e.evppi,tag:compactINR(e.evppi),color:SERIES[i%6]}))):'<p class="hint">No parameter had enough variation to estimate EVPPI; increase the iterations or check the distributions.</p>'}</div></div>
+      ${R.evppi&&R.evppi.length?`<div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">Parameter</th><th>EVPPI per patient</th>${R.popFactor>0?"<th>Population EVPPI</th>":""}</tr></thead><tbody>${R.evppi.map(e=>`<tr><td style="text-align:left;white-space:normal">${escHTML(e.parameter)}</td><td>${fmtINR(e.evppi)}</td>${R.popFactor>0?`<td>${compactINR(e.evppi*R.popFactor)}</td>`:""}</tr>`).join("")}</tbody></table></div><p class="note">Groups of up to four related parameters (e.g. one row of a transition matrix, one survival curve) are valued together. Parameters with a population EVPPI above the cost of a study are the ones worth researching.</p></div>`:""}</div>`+
+    `<div class="pane" data-pane="evpi"><div class="card flush"><div class="pad"><h3>Expected value of perfect information</h3><div class="card-sub">Per patient, across thresholds, for the decision between all ${R.nStrategies} strategies. At ${compactINR(R.wtp)}: <b>${compactINR(R.evpiAll)}</b> per patient${R.popFactor>0?`; <b>${compactINR(R.popEvpi)}</b> for the population (${fmtNum(s.popPerYear,0)} patients a year for ${s.popYears} years, discounted at 3%). If further research would cost more than this, it is not worth doing.`:"; enter the patients affected per year and the years the decision applies (left) to get the population value."}</div>${evpiChart(R.evpiCurve)}</div></div></div>`);
   wireTabs("sTabs");wireExports("Artha Sensitivity");
 }
 
@@ -1246,25 +1260,6 @@ const REFDATA={
   ],
   lifeSource:{name:"India abridged life table (SRS) — indicative",url:"https://censusindia.gov.in/census.website/data/SRSLT"}
 };
-function renderReference(){
-  const ws=document.getElementById("workspace");
-  const tT=REFDATA.thresholds.map(r=>`<tr><td>${r.item}</td><td>${r.value}</td><td style="text-align:left">${r.basis}</td><td style="text-align:left"><a href="${r.url}" target="_blank" rel="noopener">${r.source} ↗</a></td></tr>`).join("");
-  const tC=REFDATA.unitCosts.map(r=>`<tr><td>${r.item}</td><td>${fmtINR(r.value)}</td><td style="text-align:left">${r.unit}</td><td style="text-align:left">${r.category}</td></tr>`).join("");
-  const tW=REFDATA.weights.map(r=>`<tr><td style="text-align:left">${r.state}</td><td>${fmtNum(r.util,2)}</td><td>${fmtNum(r.dw,2)}</td><td style="text-align:left">${r.basis}</td></tr>`).join("");
-  const tL=REFDATA.lifeTable.map(r=>`<tr><td>${r.age}</td><td>${r.le}</td></tr>`).join("");
-  ws.innerHTML=`<div class="home">
-    <div class="ws-head"><div><h2>Reference data — India / LMIC</h2><div class="sub">A starting library of thresholds, unit costs, disability weights and life expectancy, each with its source — so you can set up a credible analysis without hunting through PDFs.</div></div></div>
-    <div class="callout" style="background:var(--gold-soft);color:#8A6712"><b>Important:</b> unit costs and disability weights below are <b>indicative starting values</b>. Always confirm the current figure from the cited official source before using it in a formal analysis or publication.</div>
-    <div class="card"><h3>Thresholds, discounting &amp; reference case</h3><div class="table-scroll"><table class="results-table"><thead><tr><th>Parameter</th><th>Value</th><th style="text-align:left">Basis</th><th style="text-align:left">Source</th></tr></thead><tbody>${tT}</tbody></table></div></div>
-    <div class="card"><h3>Indicative unit costs (₹)</h3><div class="card-sub">Source: <a href="${REFDATA.unitCostSource.url}" target="_blank" rel="noopener">${REFDATA.unitCostSource.name} ↗</a>. Use the <b>Costing</b> tab's "Add from reference library" to insert any of these.</div><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th>Unit cost</th><th style="text-align:left">Unit</th><th style="text-align:left">Category</th></tr></thead><tbody>${tC}</tbody></table></div></div>
-    <div class="two-col">
-      <div class="card"><h3>Utilities &amp; disability weights</h3><div class="card-sub">${REFDATA.weightSource.name}. <a href="${REFDATA.weightSource.url}" target="_blank" rel="noopener">GBD ↗</a></div><div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">Severity</th><th>Utility</th><th>Disability wt</th><th style="text-align:left">Basis</th></tr></thead><tbody>${tW}</tbody></table></div></div>
-      <div class="card"><h3>Life expectancy (for YLL/DALYs)</h3><div class="card-sub"><a href="${REFDATA.lifeSource.url}" target="_blank" rel="noopener">${REFDATA.lifeSource.name} ↗</a></div><div class="table-scroll"><table class="results-table"><thead><tr><th>Age (yrs)</th><th>Remaining life expectancy</th></tr></thead><tbody>${tL}</tbody></table></div></div>
-    </div>
-    <footer class="foot">Artha HE · Reference data is indicative — verify against the cited source · Developed by Dr G Hari Prakash</footer>
-  </div>`;
-}
-
 /* ============================ ROUTER ============================ */
 function wireTabs(id){const host=document.getElementById(id);host.querySelectorAll(".result-tab").forEach(tab=>tab.onclick=()=>{host.querySelectorAll(".result-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.dataset.pane===tab.dataset.p));});}
 function route(mod){

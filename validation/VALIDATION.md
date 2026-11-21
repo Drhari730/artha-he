@@ -15,6 +15,9 @@ The R engine (`engine.R`) is covered by an automated `testthat` suite (`tests/te
 | Partitioned survival | Costs, QALYs and life-years match an independent calculation to machine precision, including hazard ratios, curves in months, and PFS capped at OS |
 | Decision trees | Roll-back matches hand calculation; probabilities, '#' (the rest), parents and loops are validated |
 | Multi-strategy PSA | CEAC probabilities sum to 1; the frontier is the strategy with the highest expected net benefit; EVPI matches its definition; with two strategies the CEAC equals the pairwise result |
+| EVPPI | The regression estimator recovers analytic values: for INB = X + Y with X, Y ~ N(0,1), EVPPI(X) = 1/√(2π) and EVPPI(X, Y) = EVPI = 1/√π (within 3%); an irrelevant parameter gives ≈ 0; EVPPI never exceeds EVPI for Markov, PSM and tree models |
+| Costing (CPI) | Price-year conversion uses the index ratio when both years are in the CPI series and falls back to the annual rate otherwise |
+| Scenarios | The base case reproduces the DARTH ICER; standard scenarios change the result as expected; a failing scenario reports its own error without stopping the others |
 | Treatment effects | HR, RR and OR give the expected probabilities; the residual moves to the diagonal; invalid effects and baselines are rejected |
 | Markov engine | The cohort sums to 1 in every cycle, with and without background mortality |
 | Markov engine | Invalid matrices (rows not summing to 1, probabilities outside 0–1, blank cells) are rejected with a clear message |

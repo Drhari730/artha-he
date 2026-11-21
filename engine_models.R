@@ -251,7 +251,7 @@ psaDrawAny <- function(m, cv, mode, params) {
 
 # PSA over all (or selected) strategies: returns N x K matrices of cost and of
 # effect on the net-benefit scale.
-psaAll <- function(m, N, cv, mode, params, seed = NULL, which = NULL) {
+psaAll <- function(m, N, cv, mode, params, seed = NULL, which = NULL, record = FALSE) {
   cv <- if (!is.null(cv) && cv > 0) cv else 0.2
   N <- as.integer(N)
   if (is.na(N) || N < 1) input_error("PSA needs at least one iteration.")
@@ -260,11 +260,14 @@ psaAll <- function(m, N, cv, mode, params, seed = NULL, which = NULL) {
   m <- prepareModel(m)
   K <- length(m$strategies); idx <- if (is.null(which)) seq_len(K) else which
   C <- matrix(NA_real_, N, length(idx)); E <- matrix(NA_real_, N, length(idx))
+  recs <- if (record) vector("list", N) else NULL
   for (it in seq_len(N)) {
     mm <- psaDrawAny(m, cv, mode, params)
     for (j in seq_along(idx)) { r <- runStrategy(mm, idx[j]); C[it, j] <- r$cost; E[it, j] <- nb_effect(m, r) }
+    if (record) recs[[it]] <- psa_record(m, mm)
   }
-  list(C = C, E = E, idx = idx, names = vapply(m$strategies[idx], function(s) as.character(s$name), character(1)))
+  list(C = C, E = E, idx = idx, names = vapply(m$strategies[idx], function(s) as.character(s$name), character(1)),
+       params = if (record) stack_records(recs) else NULL)
 }
 
 # Multi-strategy CEAC (probability each strategy has the highest net benefit),
