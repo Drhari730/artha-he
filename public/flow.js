@@ -83,12 +83,12 @@ function applyProject(){
 
 /* ------------------------------- steps ---------------------------------- */
 function flowSteps(){
-  const p=proj(),e=state.evaluation,m=state.model,full=isFull(),method=projMethod();
+  const p=proj(),e=state.evaluation,m=activeModel(),full=isFull(),method=projMethod(),mk=m.type;
   const qDone=!!(p.title&&p.population&&p.intervention&&p.comparators&&p.outcome&&p.perspective&&p.scale);
   const evalCosts=(e.strats||[]).length>=2&&(e.strats||[]).some(s=>+s.cost>0);
-  const modelCosts=m.states.some(s=>+s.cost>0)||m.strategies.some(s=>+s.addCost>0);
+  const modelCosts=mk==="tree"?m.strategies.some(s=>s.nodes.some(n=>+n.cost>0)):m.states.some(s=>+s.cost>0)||m.strategies.some(s=>+s.addCost>0);
   const evalEff=(e.strats||[]).length>=2&&(e.strats||[]).some(s=>+s.effect!==0);
-  const modelEff=m.states.some(s=>+s.util>0)||m.states.some(s=>+s.dw>0);
+  const modelEff=mk==="tree"?m.strategies.some(s=>s.nodes.some(n=>+n.effect>0)):m.states.some(s=>+s.util>0)||m.states.some(s=>+s.dw>0);
   const S=[];
   S.push({key:"question",n:1,title:"Define the question",mod:"project",done:qDone,need:"required",
     desc:qDone?`${escHTML(p.intervention)} vs ${escHTML(p.comparators)} in ${escHTML(p.population)}.`:"Fill in the project panel on the left: population, intervention, comparators, outcome, perspective and level of detail."});
@@ -97,9 +97,11 @@ function flowSteps(){
   S.push({key:"outcomes",n:3,title:"Build the outcomes",mod:"vb",done:ran("vb")||(full?modelEff:evalEff),need:method==="CMA"?"optional":"required",
     desc:"Derive QALYs, utilities, life-years or transition probabilities from your evidence in the Value Builder, and send them where they are needed."});
   if(full){
-    S.push({key:"model",n:4,title:"Build and run the model",mod:"modeling",done:ran("modeling"),need:"required",
-      desc:"Health states, transition matrix (or a treatment effect such as a hazard ratio), costs and utilities. Run it to get costs, QALYs and ICERs."});
-    S.push({key:"uncertainty",n:5,title:"Test the uncertainty",mod:"sensitivity",done:ran("sensitivity"),need:"required",
+    if(mk==="psm")S.push({key:"survival",n:4,title:"Fit the survival curves",mod:"survival",done:ran("survival")||m.strategies.some(s=>s.os&&s.os.dist),need:"required",
+      desc:"Fit and extrapolate overall and progression-free survival from patient-level data or a published Kaplan-Meier curve, then send the chosen curves to the model."});
+    S.push({key:"model",n:S.length+1,title:"Build and run the model",mod:"modeling",done:ran("modeling"),need:"required",
+      desc:mk==="psm"?"Partitioned survival: OS and PFS curves (or hazard ratios) per strategy, state costs and utilities. Run it to get costs, QALYs and ICERs.":mk==="tree"?"Decision tree: branches with probabilities, costs and outcomes for each strategy. Run it to get expected costs, outcomes and ICERs.":"Choose the model type (Markov, partitioned survival or decision tree), set the inputs and run it to get costs, QALYs and ICERs."});
+    S.push({key:"uncertainty",n:S.length+1,title:"Test the uncertainty",mod:"sensitivity",done:ran("sensitivity"),need:"required",
       desc:"Probabilistic (PSA, CEAC, EVPI) and one-way (tornado) sensitivity analysis: how sure is the conclusion?"});
   }else{
     S.push({key:"evaluation",n:4,title:"Compare the options",mod:"evaluation",done:ran("evaluation")&&(e.strats||[]).length>=2,need:"required",
@@ -107,18 +109,18 @@ function flowSteps(){
     S.push({key:"uncertainty",n:5,title:"Test the uncertainty",mod:"sensitivity",done:ran("sensitivity"),need:"optional",
       desc:"Needs a model. Switch the project to Full when you need PSA for a formal submission."});
   }
-  S.push({key:"equity",n:6,title:"Patient burden & equity",mod:"oop",done:ran("oop"),need:p.perspective==="societal"||p.perspective==="patient"?"recommended":"optional",
+  S.push({key:"equity",n:S.length+1,title:"Patient burden & equity",mod:"oop",done:ran("oop"),need:p.perspective==="societal"||p.perspective==="patient"?"recommended":"optional",
     desc:"Out-of-pocket spending and catastrophic health expenditure: who bears the cost?"});
-  S.push({key:"bia",n:7,title:"Budget impact",mod:"bia",done:ran("bia"),need:"recommended",
+  S.push({key:"bia",n:S.length+1,title:"Budget impact",mod:"bia",done:ran("bia"),need:"recommended",
     desc:"Is it affordable? Annual and cumulative spend for the payer as the intervention is adopted."});
-  S.push({key:"report",n:8,title:"Report & submission pack",mod:"report",done:false,need:"required",
+  S.push({key:"report",n:S.length+1,title:"Report & submission pack",mod:"report",done:false,need:"required",
     desc:"One report with the CHEERS 2022 checklist, ready to print, save as PDF or download as Word."});
   return S;
 }
 
 /* ------------------------------- checks --------------------------------- */
 function flowChecks(){
-  const p=proj(),e=state.evaluation,m=state.model,full=isFull(),out=[];
+  const p=proj(),e=state.evaluation,m=activeModel(),full=isFull(),out=[];
   const warn=(t,go)=>out.push({lvl:"warn",t,go}),info=(t,go)=>out.push({lvl:"info",t,go});
   const method=projMethod();
   if(!p.outcome)warn("Choose the main outcome so Artha can recommend the right method.","project");
@@ -129,12 +131,14 @@ function flowChecks(){
   }
   if(GDP_PC===GDP_DEFAULT)info("GDP per capita is still the default ₹2,00,000. Enter the latest MoSPI figure in the Evaluation, Modeling or Sensitivity tab.",full?"modeling":"evaluation");
   if(!full&&(e.strats||[]).length===1)warn("Only one option in the Evaluation tab: add the comparator.","evaluation");
-  if(full){
+  if(full&&m.type==="psm"&&m.strategies.some(s=>s.os&&s.os.src==="manual"))info("A survival curve was entered by hand: cite its source, and note that its parameter uncertainty is not sampled in PSA (curves fitted in the Survival tab are).","modeling");
+  if(full&&m.type==="tree"&&m.strategies.some(s=>s.nodes.length<2))warn("A decision-tree strategy has no branches yet.","modeling");
+  if(full&&m.type!=="tree"){
     if(+m.horizon<10)info(`The model horizon is ${m.horizon} years. HTA usually needs a horizon long enough to capture all differences (often lifetime).`,"modeling");
-    if(+m.horizon>=20&&!m.bgMortality)info("Long horizon without background (all-cause) mortality: consider switching it on with your country's life table.","modeling");
-    if(m.bgMortality&&!(m.lifeTable&&m.lifeTable.length))info("Background mortality uses the crude illustrative table. Paste an official life table (e.g. SRS) for formal work.","modeling");
+    if(m.type==="markov"&&+m.horizon>=20&&!m.bgMortality)info("Long horizon without background (all-cause) mortality: consider switching it on with your country's life table.","modeling");
+    if(m.type==="markov"&&m.bgMortality&&!(m.lifeTable&&m.lifeTable.length))info("Background mortality uses the crude illustrative table. Paste an official life table (e.g. SRS) for formal work.","modeling");
     m.states.forEach(s=>{if(!s.absorbing&&(+s.util>1||+s.util<0))warn(`Utility of “${escHTML(s.name)}” is ${s.util}; utilities should be between 0 and 1.`,"modeling");});
-    m.strategies.forEach(s=>{if(!s.effect&&s.matrix&&s.matrix.some(r=>Math.abs(rowSum(r)-1)>0.001))warn(`A row of the “${escHTML(s.name)}” matrix does not sum to 1.`,"modeling");});
+    if(m.type==="markov")m.strategies.forEach(s=>{if(!s.effect&&s.matrix&&s.matrix.some(r=>Math.abs(rowSum(r)-1)>0.001))warn(`A row of the “${escHTML(s.name)}” matrix does not sum to 1.`,"modeling");});
     if(ran("modeling")&&!ran("sensitivity"))warn("The model has been run but the uncertainty has not been tested (PSA). HTA bodies expect it.","sensitivity");
   }
   const c=state.costing;if(c&&c.method==="micro"&&(c.rows||[]).length&&+c.toYear<new Date().getFullYear()-1)info(`Costs are in ${c.toYear} prices. Update the price year if you need current prices.`,"costing");
@@ -147,7 +151,7 @@ function flowChecks(){
 // Status: auto (Artha supplies it), partial (Artha supplies some; add sources),
 // you (the author must write it), missing (a project field is empty).
 function cheersItems(){
-  const p=proj(),m=state.model,full=isFull(),c=state.costing,mm=m.correction==="simpson"?"Simpson's 1/3":"half-cycle";
+  const p=proj(),m=activeModel(),full=isFull(),c=state.costing,mm=m.correction==="simpson"?"Simpson's 1/3":"half-cycle";
   const val=(v,txt)=>v?{s:"auto",x:txt||v}:{s:"missing",x:"Fill in on the Project panel"};
   const runOr=(k,txt,miss)=>ran(k)?{s:"auto",x:txt}:{s:"missing",x:miss};
   const methodTxt=projMethod()?METHOD_TEXT[projMethod()]:"";
@@ -160,15 +164,15 @@ function cheersItems(){
     ["Setting and location",val(p.setting)],
     ["Comparators",val(p.comparators,p.comparators&&`${p.intervention||"Intervention"} vs ${p.comparators}`)],
     ["Perspective",val(PERSPECTIVES[p.perspective])],
-    ["Time horizon",full?runOr("modeling",`${m.horizon} years (${m.cycle}-year cycles)`,"Run the model"):{s:"you",x:"State the period over which costs and outcomes were measured."}],
-    ["Discount rate",full?runOr("modeling",`${pct(m.dCost,1)} costs, ${pct(m.dEff,1)} outcomes${p.refCase==="htain"?" (India reference case)":""}`,"Run the model"):{s:"you",x:"State the discount rate used for costs and outcomes beyond one year."}],
+    ["Time horizon",full&&m.type==="tree"?{s:"you",x:"State the period over which the tree's costs and outcomes apply."}:full?runOr("modeling",`${m.horizon} years (${m.cycle}-year cycles)`,"Run the model"):{s:"you",x:"State the period over which costs and outcomes were measured."}],
+    ["Discount rate",full&&m.type==="tree"?{s:"you",x:"Decision tree: state whether outcomes beyond one year were discounted."}:full?runOr("modeling",`${pct(m.dCost,1)} costs, ${pct(m.dEff,1)} outcomes${p.refCase==="htain"?" (India reference case)":""}`,"Run the model"):{s:"you",x:"State the discount rate used for costs and outcomes beyond one year."}],
     ["Selection of outcomes",p.outcome?{s:"auto",x:`${OUTCOMES[p.outcome].label}. ${methodTxt}`}:{s:"missing",x:"Choose the main outcome"}],
     ["Measurement of outcomes",(ran("vb")||ran("modeling"))?{s:"partial",x:"Derived in Artha (Value Builder / model); add the source of each clinical input."}:{s:"you",x:"Describe how outcomes were measured."}],
     ["Valuation of outcomes",(ran("vb")||ran("modeling"))?{s:"partial",x:"Utilities entered per health state; name the instrument and value set (e.g. EQ-5D-5L India)."}:{s:"you",x:"Describe how outcomes were valued."}],
     ["Measurement and valuation of resources and costs",ran("costing")?{s:"partial",x:`${c.method==="advanced"?"Activity-based":c.method==="gross"?"Top-down (gross)":"Bottom-up (micro)"} costing in Artha; cite each unit-cost source.`}:{s:"missing",x:"Run the costing"}],
     ["Currency, price date, and conversion",ran("costing")?{s:"auto",x:`Indian rupees (₹)${c.method==="micro"?`, ${c.toYear} prices, inflated at ${pct(c.inflation)} per year`:""}.`}:{s:"missing",x:"Run the costing"}],
-    ["Rationale and description of model",full?runOr("modeling",`${m.states.length}-state Markov cohort model (${m.states.map(s=>s.name).join(", ")}), ${m.strategies.length} strategies.`,"Run the model"):{s:"you",x:"No decision model (summary-level comparison); say why that is adequate."}],
-    ["Analytics and assumptions",full?runOr("modeling",`${mm} within-cycle correction; ${m.bgMortality?"age-specific background mortality":"no background mortality"}; ${m.strategies.some(s=>s.effect)?"treatment effects applied as ratios to the baseline matrix":"strategy-specific transition matrices"}.`,"Run the model"):{s:"you",x:"Describe the analytical methods and assumptions."}],
+    ["Rationale and description of model",full?runOr("modeling",m.type==="psm"?`Partitioned survival model (progression-free, progressed, dead) driven by overall and progression-free survival curves; ${m.strategies.length} strategies. Explain why this structure suits the decision.`:m.type==="tree"?`Decision tree with ${m.strategies.length} strategies. Explain why a short-term tree suits the decision.`:`${m.states.length}-state Markov cohort model (${m.states.map(s=>s.name).join(", ")}), ${m.strategies.length} strategies.`,"Run the model"):{s:"you",x:"No decision model (summary-level comparison); say why that is adequate."}],
+    ["Analytics and assumptions",full&&m.type==="psm"?runOr("modeling",`${mm} within-cycle correction; survival curves ${m.strategies.some(s=>s.os&&s.os.dist)?"fitted by maximum likelihood (exponential, Weibull, Gompertz, log-logistic, log-normal; chosen on AIC/BIC and plausibility)":"entered from published sources"}; treatment effects as hazard ratios where used; PFS capped at OS.`,"Run the model"):full&&m.type==="tree"?runOr("modeling","Expected values by rolling back the tree; costs and outcomes accumulate along each path.","Run the model"):full?runOr("modeling",`${mm} within-cycle correction; ${m.bgMortality?"age-specific background mortality":"no background mortality"}; ${m.strategies.some(s=>s.effect)?"treatment effects applied as ratios to the baseline matrix":"strategy-specific transition matrices"}.`,"Run the model"):{s:"you",x:"Describe the analytical methods and assumptions."}],
     ["Characterizing heterogeneity",p.heterogeneity?{s:"auto",x:p.heterogeneity}:{s:"you",x:"Describe subgroup analyses, or state none were done."}],
     ["Characterizing distributional effects",p.distributional?{s:"auto",x:p.distributional}:ran("oop")?{s:"partial",x:"Out-of-pocket and catastrophic expenditure analysed; describe equity implications."}:{s:"you",x:"Describe effects across population groups, or state none."}],
     ["Characterizing uncertainty",ran("sensitivity")?{s:"auto",x:`Probabilistic SA (${state.sens.N} iterations, seed ${state.sens.seed}) and one-way SA (tornado).`}:{s:"missing",x:"Run the sensitivity analysis"}],
@@ -211,26 +215,26 @@ function renderProject(){
 /* ---------------------- "Use this result" links ------------------------- */
 // kind: cost | effect | utility | prob. Records provenance for the report.
 function useDestinations(kind){
-  const e=state.evaluation,m=state.model,d=[];
+  const e=state.evaluation,mk=modelKind(),m=modelStore(),d=[];
   const sn=x=>escHTML(x||"");
   if(kind==="cost"){
     (e.strats||[]).forEach((s,i)=>d.push([`eval-cost:${i}`,`Evaluation · cost of “${sn(s.strategy)}”`]));
     d.push(["eval-new-cost","Evaluation · add as a new option"]);
-    m.states.forEach((s,i)=>{if(!s.absorbing)d.push([`model-state-cost:${i}`,`Model · cost per cycle in “${sn(s.name)}”`]);});
-    m.strategies.forEach((s,i)=>d.push([`model-add-cost:${i}`,`Model · added cost per cycle of “${sn(s.name)}”`]));
+    if(mk!=="tree"){m.states.forEach((s,i)=>{if(!s.absorbing)d.push([`model-state-cost:${i}`,`Model · annual cost in “${sn(s.name)}”`]);});
+    m.strategies.forEach((s,i)=>d.push([`model-add-cost:${i}`,`Model · annual treatment cost of “${sn(s.name)}”`]));}
     d.push(["bia-costNew","Budget impact · new treatment cost per patient-year"],["bia-costOld","Budget impact · current treatment cost per patient-year"]);
   }else if(kind==="effect"){
     (e.strats||[]).forEach((s,i)=>d.push([`eval-effect:${i}`,`Evaluation · outcome of “${sn(s.strategy)}”`]));
     d.push(["eval-new-effect","Evaluation · add as a new option"]);
   }else if(kind==="utility"){
-    m.states.forEach((s,i)=>{if(!s.absorbing)d.push([`model-state-util:${i}`,`Model · utility of “${sn(s.name)}”`]);});
+    if(mk!=="tree")m.states.forEach((s,i)=>{if(!s.absorbing)d.push([`model-state-util:${i}`,`Model · utility of “${sn(s.name)}”`]);});
   }else if(kind==="prob"){
-    m.strategies.forEach((s,k)=>{if(s.effect)return;m.states.forEach((a,i)=>{if(a.absorbing)return;m.states.forEach((b,j)=>{if(i!==j)d.push([`model-p:${k}:${i}:${j}`,`Model · “${sn(s.name)}”: ${sn(a.name)} → ${sn(b.name)}`]);});});});
+    if(mk==="markov")m.strategies.forEach((s,k)=>{if(s.effect)return;m.states.forEach((a,i)=>{if(a.absorbing)return;m.states.forEach((b,j)=>{if(i!==j)d.push([`model-p:${k}:${i}:${j}`,`Model · “${sn(s.name)}”: ${sn(a.name)} → ${sn(b.name)}`]);});});});
   }
   return d;
 }
 function applyUse(dest,value,from){
-  const e=state.evaluation,m=state.model,b=state.bia,[k,...a]=dest.split(":"),i=+a[0];
+  const e=state.evaluation,m=modelStore(),b=state.bia,[k,...a]=dest.split(":"),i=+a[0];
   let label="",go=null;
   switch(k){
     case "eval-cost":e.strats[i].cost=+value.toFixed(2);label=`cost of “${e.strats[i].strategy}”`;go="evaluation";break;
@@ -282,6 +286,7 @@ function reportPayload(){
   const p=proj();
   return Object.assign({},state,{
     project:Object.assign({},p,{outcomeLabel:OUTCOMES[p.outcome]?OUTCOMES[p.outcome].label:"",perspectiveLabel:PERSPECTIVES[p.perspective]||"",method:projMethod()||"",refCaseLabel:REF_CASES[p.refCase]?REF_CASES[p.refCase].label:""}),
+    model:activeModel(),
     cheers:cheersItems().map(x=>({n:x.n,topic:x.topic,status:CH_TAG[x.status][1],text:x.text})),
     provenanceList:Object.values(state.provenance||{}).map(v=>({target:v.target,from:v.from,at:(v.at||"").slice(0,10)}))
   });

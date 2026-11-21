@@ -116,6 +116,16 @@ table.data-grid tr:last-child td{border-bottom:none;}
 .csv-drop input[type=file]{display:none;}
 
 /* checklist (advisor) */
+ul.tree,ul.tree ul{list-style:none;margin:0;padding-left:22px;position:relative;}
+ul.tree{padding-left:0;}
+ul.tree ul::before{content:"";position:absolute;left:8px;top:0;bottom:10px;border-left:1.5px solid var(--line);}
+ul.tree li{position:relative;margin:6px 0;}
+ul.tree ul>li::before{content:"";position:absolute;left:-14px;top:15px;width:12px;border-top:1.5px solid var(--line);}
+.tnode{display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--line);border-radius:9px;padding:6px 10px;background:var(--surface);font-size:12.5px;}
+.tnode.leaf{background:var(--surface-2);}
+.tnode .tp{font-family:var(--mono);font-size:11px;color:var(--primary);}
+.tnode .tc{font-family:var(--mono);font-size:11px;color:var(--gold);}
+.tnode .te{font-family:var(--mono);font-size:11px;color:var(--emerald);}
 .flow-steps{display:flex;flex-direction:column;gap:10px;margin-top:6px;}
 .flow-step{display:flex;gap:14px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface);}
 .flow-step.done{background:var(--surface-2);}
@@ -287,6 +297,7 @@ abbr.gl{border-bottom:1.5px dotted var(--primary);cursor:help;text-decoration:no
       <button data-mod="costing">Costing</button>
       <button data-mod="oop">Out-of-Pocket</button>
       <button data-mod="vb">Value Builder</button>
+      <button data-mod="survival">Survival</button>
       <button data-mod="evaluation">Evaluation</button>
       <button data-mod="modeling">Modeling</button>
       <button data-mod="sensitivity">Sensitivity</button>
@@ -298,7 +309,7 @@ abbr.gl{border-bottom:1.5px dotted var(--primary);cursor:help;text-decoration:no
       <button class="tbtn rep" id="reportBtn" title="Generate one combined report of every analysis">▤ Report</button>
       <button class="tbtn" id="saveProj" title="Save your whole project to a file">⤓ Save</button>
       <label class="tbtn" title="Load a saved project file">⤒ Load<input type="file" id="loadProj" accept=".json" hidden></label>
-      <div class="brand-meta">v3.6.0 · autosaved<br>Dr G Hari Prakash</div>
+      <div class="brand-meta">v3.7.0 · autosaved<br>Dr G Hari Prakash</div>
     </div>
   </header>
   <div class="layout" id="layout">
@@ -308,7 +319,8 @@ abbr.gl{border-bottom:1.5px dotted var(--primary);cursor:help;text-decoration:no
   </div>
 </div>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script src="app.js?v=3.6.0"></script>
-<script src="flow.js?v=3.6.0"></script>
+<script src="app.js?v=3.7.0"></script>
+<script src="models.js?v=3.7.0"></script>
+<script src="flow.js?v=3.7.0"></script>
 </body>
 </html>

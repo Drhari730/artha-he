@@ -10,6 +10,11 @@ The R engine (`engine.R`) is covered by an automated `testthat` suite (`tests/te
 | Markov engine | **Reproduces the published DARTH Sick-Sicker base case** (Alarid-Escudero et al., *Med Decis Making* 2023;43:3–20; corrected results in DARTH v0.3.0 NEWS.md). All four strategies match: costs to the dollar, QALYs to two decimals, ICERs $73,279 (B) and $125,302 (AB), Strategy A dominated |
 | Markov engine | Agrees with a separately written reference implementation (no engine code) to machine precision on all four DARTH strategies |
 | Markov engine | Simpson's 1/3 (+3/8) weights sum to *n* and integrate cubic polynomials exactly |
+| Survival fitting | Exponential, Weibull, log-logistic and log-normal maximum-likelihood fits match R `survival::survreg` (parameters and log-likelihood); Gompertz is checked as a true maximum and recovers simulated parameters; Kaplan-Meier matches `survival::survfit` |
+| Guyot reconstruction | Rebuilding patient-level data from a KM curve and its numbers-at-risk table reproduces the curve (max difference < 0.02) and the Weibull fit (within 5%) |
+| Partitioned survival | Costs, QALYs and life-years match an independent calculation to machine precision, including hazard ratios, curves in months, and PFS capped at OS |
+| Decision trees | Roll-back matches hand calculation; probabilities, '#' (the rest), parents and loops are validated |
+| Multi-strategy PSA | CEAC probabilities sum to 1; the frontier is the strategy with the highest expected net benefit; EVPI matches its definition; with two strategies the CEAC equals the pairwise result |
 | Treatment effects | HR, RR and OR give the expected probabilities; the residual moves to the diagonal; invalid effects and baselines are rejected |
 | Markov engine | The cohort sums to 1 in every cycle, with and without background mortality |
 | Markov engine | Invalid matrices (rows not summing to 1, probabilities outside 0–1, blank cells) are rejected with a clear message |

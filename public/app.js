@@ -157,11 +157,11 @@ function scatterPSA(d,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,
   d.forEach(x=>{g+=`<circle cx="${X(x.incEff)}" cy="${Y(x.incCost)}" r="3" fill="${nmb(x.incCost,x.incEff,wtp)>0?C.primary:C.red}" fill-opacity="0.45"/>`;});
   g+=txt(ox+pw,oy+22,"Δ QALYs →",{anchor:"end",fill:C.muted,size:11})+txt(ox+8,26,"↑ Δ cost",{fill:C.muted,size:11});
   return svgWrap(W,H,g);}
-function lineChart(series,xlab,xmax){const W=680,H=380,ox=66,oy=H-50,pw=W-ox-26,ph=oy-22,yMax=Math.max(...series.flatMap(s=>s.data.map(d=>d.y)),.001)*1.05,X=v=>ox+(v/xmax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
+function lineChart(series,xlab,xmax,opts){const o=opts||{},tip=o.tip||((s,d)=>`${s.label} · year ${d.x}: ${(d.y*100).toFixed(1)}%`);const W=680,H=380,ox=66,oy=H-50,pw=W-ox-26,ph=oy-22,yMax=Math.max(...series.flatMap(s=>s.data.map(d=>d.y)),.001)*1.05,X=v=>ox+(v/xmax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(yMax*i/4).toFixed(yMax<3?2:0),{anchor:"end",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  series.forEach((s,si)=>{g+=`<polyline points="${s.data.map(d=>`${X(d.x)},${Y(d.y)}`).join(" ")}" fill="none" stroke="${s.color||SERIES[si%6]}" stroke-width="2.4"><title>${s.label}</title></polyline>`;
-    s.data.forEach(d=>{g+=`<circle cx="${X(d.x)}" cy="${Y(d.y)}" r="3" fill="${s.color||SERIES[si%6]}" opacity="0"><title>${s.label} · year ${d.x}: ${(d.y*100).toFixed(1)}%</title></circle>`;});});
+  series.forEach((s,si)=>{g+=`<polyline points="${s.data.map(d=>`${X(d.x)},${Y(d.y)}`).join(" ")}" fill="none" stroke="${s.color||SERIES[si%6]}" stroke-width="2.4" ${s.dash?'stroke-dasharray="7 5"':""}><title>${s.label}</title></polyline>`;
+    s.data.forEach(d=>{g+=`<circle cx="${X(d.x)}" cy="${Y(d.y)}" r="3" fill="${s.color||SERIES[si%6]}" opacity="0"><title>${tip(s,d)}</title></circle>`;});});
   g+=txt(ox+pw/2,H-12,xlab,{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
 function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xmax=curve[curve.length-1].wtp,X=v=>ox+(v/xmax)*pw,Y=v=>oy-v*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
@@ -689,6 +689,7 @@ function wireEffectEditor(m,as){const e=as.effect;
   document.querySelectorAll("[data-etr]").forEach(el=>el.onchange=()=>{e.transitions=[...document.querySelectorAll("[data-etr]")].filter(x=>x.checked).map(x=>x.dataset.etr.split(",").map(Number));renderModelSidebar();});
 }
 function renderModelSidebar(){
+  if(modelKind()!=="markov")return renderAltModelSidebar();
   const m=state.model;fixModel(m);
   const stRows=m.states.map((s,i)=>`<tr><td><input data-sf="name" data-i="${i}" value="${s.name}"></td><td><input data-sf="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-sf="util" data-i="${i}" type="number" step="0.01" value="${s.util}" style="text-align:right"></td><td><input data-sf="dw" data-i="${i}" type="number" step="0.01" value="${s.dw}" style="text-align:right"></td><td style="text-align:center"><input data-sf="absorbing" data-i="${i}" type="checkbox" ${s.absorbing?"checked":""}></td><td class="row-del" data-sdel="${i}">&times;</td></tr>`).join("");
   const strBtns=m.strategies.map((s,i)=>`<button data-strat="${i}" class="${m.activeStrat===i?"active":""}">${s.name}</button>`).join("");
@@ -696,6 +697,7 @@ function renderModelSidebar(){
   const head=m.states.map(s=>`<th>${s.name}</th>`).join("");
   const matRows=(as.effect?[]:as.matrix).map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">04</span> Markov model</h2>
+    ${modelTypeSeg()}
     <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
     ${exRow("model")}
     <div class="sublabel">Health states (cost · utility · disability weight · dead?)</div>
@@ -703,7 +705,7 @@ function renderModelSidebar(){
     <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
     <div class="sublabel">Strategies &amp; transition matrix</div>
     <div class="seg types" id="stratSel">${strBtns}</div>
-    <div class="field two"><div><label>Strategy name</label><input type="text" id="stratName" value="${escHTML(as.name)}"></div><div><label>Added cost / cycle</label><input type="number" id="stratAdd" value="${as.addCost}"></div></div>
+    <div class="field two"><div><label>Strategy name</label><input type="text" id="stratName" value="${escHTML(as.name)}"></div><div><label>Added cost / year</label><input type="number" id="stratAdd" value="${as.addCost}"></div></div>
     <div class="seg" id="trMode" style="margin-bottom:8px"><button data-tm="matrix" class="${as.effect?"":"active"}">Own transition matrix</button><button data-tm="effect" class="${as.effect?"active":""}">Treatment effect on a baseline</button></div>
     ${as.effect?effectEditor(m,as):`<p class="hint" style="margin:-4px 0 8px">Row = from-state, column = to-state. Each row should sum to 1.0 (shown right).</p>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>from\\to</th>${head}<th>Σ</th></tr></thead><tbody id="matRows">${matRows}</tbody></table></div>`}
@@ -773,10 +775,11 @@ function renderModelSidebar(){
   ["cvVal","cvKind","cvT","cvCyc"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=convCalc;});convCalc();
   const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
   document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{m.wtp=+b.dataset.mwtp;renderModelSidebar();renderModel();});
-  document.getElementById("runModel").onclick=renderModel;wireGdp();
+  document.getElementById("runModel").onclick=renderModel;wireGdp();wireModelTypeSeg();
   wireExamples("model");
 }
 async function renderModel(){
+  if(modelKind()!=="markov")return renderAltModel();
   const m=state.model,ws=document.getElementById("workspace");
   if(!(m.states.some(s=>+s.util>0||+s.cost>0)||m.strategies.some(s=>+s.addCost>0)))return emptyState("Decision-analytic modeling","Define your health states (cost, utility, disability weight) and fill each strategy's transition matrix in the panel on the left — or load a worked example — then Run model.");
   wsBusy("Markov model");
@@ -820,11 +823,11 @@ function syncSensParams(m, s) {
 }
 
 function renderSensSidebar(){
-  const s=state.sens, m=state.model;
+  const s=state.sens, m=activeModel(), isMk=m.type==="markov";
   if(s.ref==null)s.ref=0; if(s.cmp==null)s.cmp=1;
-  syncSensParams(m, s);
+  if(!isMk)s.mode="global"; else syncSensParams(m, s);
   
-  const opts=m.strategies.map((st,i)=>`<option value="${i}">${st.name}</option>`).join("");
+  const opts=m.strategies.map((st,i)=>`<option value="${i}">${escHTML(st.name)}</option>`).join("");
   
   let gridHtml = "";
   if (s.mode === "per_parameter") {
@@ -849,7 +852,8 @@ function renderSensSidebar(){
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">05</span> Sensitivity</h2>
     <p class="hint">How robust is the model's conclusion to uncertainty — deterministic (tornado) and probabilistic (PSA → CEAC, EVPI).</p>
     <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
-    <div class="field"><label>Distribution mode</label><select id="sMode"><option value="global" ${s.mode==="global"?"selected":""}>Global CV (Simple)</option><option value="per_parameter" ${s.mode==="per_parameter"?"selected":""}>Per-Parameter (Advanced)</option></select></div>
+    ${isMk?"":`<p class="hint">${m.type==="psm"?"Partitioned survival":"Decision tree"} model: costs (Gamma), utilities (Beta), ${m.type==="psm"?"survival-curve parameters (multivariate normal from the fit) and hazard ratios (lognormal from their 95% CI)":"branch probabilities (Beta, rebalanced to sum to 1)"} are sampled at the CV you choose.</p>`}
+    <div class="field" ${isMk?"":'style="display:none"'}><label>Distribution mode</label><select id="sMode"><option value="global" ${s.mode==="global"?"selected":""}>Global CV (Simple)</option><option value="per_parameter" ${s.mode==="per_parameter"?"selected":""}>Per-Parameter (Advanced)</option></select></div>
     ${s.mode === "global" ? `<div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>` : gridHtml}
     <div class="field"><label>Random seed (same seed = same results)</label><input type="number" id="psaSeed" value="${s.seed==null?20251121:s.seed}"></div>
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
@@ -881,19 +885,22 @@ function renderSensSidebar(){
   document.getElementById("runSens").onclick=renderSens;wireGdp();
 }
 async function renderSens(){
-  const s=state.sens,m=state.model,ws=document.getElementById("workspace");
-  if(!(m.states.some(x=>+x.util>0||+x.cost>0)||m.strategies.some(x=>+x.addCost>0)))return emptyState("Sensitivity analysis","This runs on the Markov model. First set up the model in the Modeling tab (or load an example there), then come back and Run analysis.");
+  const s=state.sens,m=activeModel(),ws=document.getElementById("workspace");
+  if(!modelReady(m))return emptyState("Sensitivity analysis","This runs on your model (Markov, partitioned survival or decision tree). First set it up in the Modeling tab (or load an example there), then come back and Run analysis.");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
   let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed});}catch(e){return wsError(e);}
   markRun("sensitivity");
   const unit=R.unit;
-  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)}: Gamma costs (state and treatment), Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept); treatment effects lognormal from their 95% CI.`;
+  const desc = m.type!=="markov" ? `Costs, utilities${m.type==="psm"?", survival-curve parameters and hazard ratios":" and branch probabilities"} sampled (CV ${pct(R.cv,0)}).` : s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)}: Gamma costs (state and treatment), Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept); treatment effects lognormal from their 95% CI.`;
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div><div class="k-sub">seed ${R.seed}</div></div></div>
-      <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
+      <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button>${R.nStrategies>2?'<button class="result-tab" data-p="multi">All strategies</button>':""}<button class="result-tab" data-p="evpi">EVPI by threshold</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
       <div class="pane" data-pane="scatter"><div class="card flush"><div class="pad"><h3>PSA on the CE plane</h3><div class="card-sub">Each point = one Monte-Carlo draw. Purple = cost-effective at current WTP.</div>${scatterPSA(R.draws,R.wtp)}</div></div></div>
       <div class="pane" data-pane="tor"><div class="card flush"><div class="pad"><h3>One-way sensitivity — tornado</h3><div class="card-sub">Net monetary benefit as each parameter moves to the low (amber) and high (purple) end of its range. Ranges come from your per-parameter distributions (95% interval), each treatment effect's 95% CI and 0–5% discounting; others are an assumed ±30% (costs) or ±0.1 (utilities), as labelled.</div>${tornado(R.tornado)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.amber}"></span>Low value</div><div class="item"><span class="sw" style="background:${C.primary}"></span>High value</div></div></div></div>`;
+  const wsS=document.getElementById("workspace");
+  wsS.querySelector('[data-pane="tor"]').insertAdjacentHTML("afterend",(R.nStrategies>2?`<div class="pane" data-pane="multi"><div class="card flush"><div class="pad"><h3>Acceptability curves: all ${R.nStrategies} strategies</h3><div class="card-sub">Probability each strategy has the highest net benefit. Circles mark the acceptability frontier: the strategy with the highest <i>expected</i> net benefit at each threshold.</div>${ceacMultiChart(R.ceacMulti,R.ceaf)}</div><div class="legend">${R.ceacMulti.map((c,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${escHTML(c.name)}</div>`).join("")}<div class="item"><span class="sw" style="background:transparent;border:1.5px solid ${C.ink};border-radius:50%"></span>Frontier</div></div></div></div>`:"")+
+    `<div class="pane" data-pane="evpi"><div class="card flush"><div class="pad"><h3>Expected value of perfect information</h3><div class="card-sub">Per patient, across thresholds, for the decision between all ${R.nStrategies} strategies. At ${compactINR(R.wtp)}: <b>${compactINR(R.evpiAll)}</b> per patient; multiply by the number of patients affected to judge whether more research is worthwhile.</div>${evpiChart(R.evpiCurve)}</div></div></div>`);
   wireTabs("sTabs");wireExports("Artha Sensitivity");
 }
 
@@ -970,7 +977,7 @@ async function renderMethods(){
   const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
   const limitations=[
     ["Costing","Advanced costing covers salary apportioning, capital annualisation and space. Inflation uses a single constant rate (not a CPI series), and there is no PPP / currency conversion yet."],
-    ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles. Age-specific background mortality from your own life table and a rate→probability helper are provided. Tunnel states and fully time-varying disease transitions are not yet supported, so take care with long horizons. Partitioned-survival and decision-tree models are not yet available."],
+    ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles. Age-specific background mortality from your own life table and a rate→probability helper are provided. Tunnel states and fully time-varying disease transitions are not yet supported, so take care with long horizons."],
     ["PSA uncertainty","In Global mode, distributions (Gamma / Beta / Dirichlet) use one coefficient of variation you choose; use Per-Parameter mode to set them from your data. Each strategy's transition rows are sampled with common random numbers, which keeps the arms correlated. Strategies defined by a treatment effect (HR / RR / OR) are rebuilt from the sampled baseline in every draw, with the effect drawn from its 95% CI. Strategy-specific utility overrides are not sampled."],
     ["DALYs are approximate","YLL uses one life-expectancy value rather than the GBD reference life table; age-weighting/discounting choices are not exposed."],
     ["Reference data is indicative","Unit costs, disability weights and life tables are starting values — confirm each from its cited official source before formal use."]
@@ -981,7 +988,9 @@ async function renderMethods(){
     "Net monetary benefit = effect × WTP − cost.",
     "Markov cohort: state occupancy via the transition matrix, with half-cycle correction and discounting of costs and effects.",
     "DALYs = years lived with disability (occupancy × disability weight) + years of life lost (deaths × life expectancy).",
-    "PSA: Monte-Carlo sampling — Gamma (costs), Beta (utilities), Dirichlet (transition rows); CEAC = P(NMB>0 | WTP); EVPI = E[max NB] − max E[NB]."
+    "PSA: Monte-Carlo sampling — Gamma (costs), Beta (utilities), Dirichlet (transition rows), multivariate normal (survival-curve parameters), lognormal (hazard ratios); CEAC = P(strategy has the highest NMB | WTP), with the acceptability frontier; EVPI = E[max NB] − max E[NB].",
+    "Survival: maximum-likelihood fits with right censoring (exponential, Weibull, Gompertz, log-logistic, log-normal; checked against R survival::survreg); patient-level data rebuilt from published Kaplan-Meier curves with the Guyot et al. (2012) algorithm.",
+    "Partitioned survival: progression-free = PFS, progressed = OS − PFS, dead = 1 − OS. Decision trees: expected values by rolling back path probabilities."
   ];
   ws.innerHTML=`<div class="home">
     <div class="ws-head"><div><h2>Methods, validation &amp; limitations</h2><div class="sub">Full transparency on what Artha HE computes, how it was checked, and — importantly — what it does <b>not</b> yet do. This tool is intended for teaching and for scoping/first-pass analysis; verify everything before any formal study or submission.</div></div></div>
@@ -1005,7 +1014,7 @@ async function renderMethods(){
     <div class="card"><h3>Methods used (standard, published)</h3>
       <div class="card-sub">The engine implements standard, published health-economics methods; the R code is in the repository for inspection:</div>
       <ul class="checklist">${methodsUsed.map(m=>`<li><span class="ok">→</span><span>${m}</span></li>`).join("")}</ul>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${["CHEERS 2022","Half-cycle correction","PSA · CEAC · EVPI","India reference case","Automated tests"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${["CHEERS 2022","Markov · partitioned survival · decision trees","Survival fitting (Guyot)","PSA · CEAC/CEAF · EVPI","India reference case","Automated tests"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
 
     <h2 class="sec">Glossary</h2>
     <p class="secsub">Plain-language definitions — hover the dotted terms anywhere in the app to see these.</p>
@@ -1271,7 +1280,8 @@ function route(mod){
     modeling:()=>{renderModelSidebar();renderModel();},
     sensitivity:()=>{renderSensSidebar();renderSens();},
     bia:()=>{renderBiaSidebar();renderBia();},
-    vb:()=>{renderVbSidebar();renderVb();}})[mod]();
+    vb:()=>{renderVbSidebar();renderVb();},
+    survival:()=>{renderSurvSidebar();renderSurv();}})[mod]();
   saveLocal();
 }
 document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));

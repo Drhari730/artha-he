@@ -457,33 +457,21 @@ markovGeneric <- function(m, strat) {
     trace[t + 1, ] <- nx
   }
 
-  w <- wcc_weights(nC, if (is.null(m$correction)) "half-cycle" else m$correction)
-  tt <- (0:nC) * cyc
-  dc <- w * cyc / (1 + num(m$dCost))^tt
-  de <- w * cyc / (1 + num(m$dEff))^tt
-  wu <- w * cyc
-
-  occC <- colSums(trace * dc); occE <- colSums(trace * de); occU <- colSums(trace * wu)
-  costByState <- occC * rw$cost
-  qalyByState <- occE * rw$util
-  YLD <- sum(occE * rw$dw)
-  deaths <- if (length(absIdx)) rowSums(trace[2:(nC + 1), absIdx, drop = FALSE] - trace[1:nC, absIdx, drop = FALSE]) else rep(0, nC)
-  YLL <- sum(deaths * num(m$lifeExp) / (1 + num(m$dEff))^((0:(nC - 1)) * cyc))
-
-  list(cost = sum(costByState), qaly = sum(qalyByState), ly = sum(occE[alive]),
-       daly = YLD + YLL, yll = YLL, yld = YLD,
-       undisc = list(cost = sum(occU * rw$cost), qaly = sum(occU * rw$util), ly = sum(occU[alive])),
-       costByState = costByState, qalyByState = qalyByState,
-       trace = trace, nC = nC)
+  trace_rewards(m, strat, trace)
 }
 
 modelRunAll <- function(m) {
-  m <- fixModel(m)
-  lapply(m$strategies, function(s) {
-    r <- markovGeneric(m, s)
-    list(name = s$name, cost = r$cost, qaly = r$qaly, ly = r$ly, daly = r$daly,
-         undisc = r$undisc, costByState = as.list(r$costByState), qalyByState = as.list(r$qalyByState),
-         trace = r$trace)
+  m <- prepareModel(m)
+  lapply(seq_along(m$strategies), function(k) {
+    s <- m$strategies[[k]]
+    r <- runStrategy(m, k)
+    out <- list(name = s$name, cost = r$cost, qaly = r$qaly, ly = r$ly, daly = r$daly, undisc = r$undisc)
+    if (!is.null(r$costByState)) { out$costByState <- as.list(r$costByState); out$qalyByState <- as.list(r$qalyByState) }
+    if (!is.null(r$trace)) out$trace <- r$trace
+    if (!is.null(r$effect)) out$effect <- r$effect
+    if (!is.null(r$paths)) out$paths <- r$paths
+    if (isTRUE(r$crossing)) out$crossing <- TRUE
+    out
   })
 }
 
@@ -578,20 +566,8 @@ psaDraw <- function(m, cv, mode, params) {
 }
 
 psaModel <- function(m, N, iRef, iCmp, cv, mode, params, seed = NULL) {
-  cv <- if (!is.null(cv) && cv > 0) cv else 0.2
-  N <- as.integer(N)
-  if (is.na(N) || N < 1) input_error("PSA needs at least one iteration.")
-  if (N > LIMITS$psaN) input_error(paste0("At most ", LIMITS$psaN, " PSA iterations are supported."))
-  if (!is.null(seed) && !is.na(seed)) set.seed(as.integer(seed))
-  m <- fixModel(m)
-  qaly <- identical(m$outcome, "QALY") || is.null(m$outcome)
-  lapply(seq_len(N), function(it) {
-    mm <- psaDraw(m, cv, mode, params)
-    ref <- markovGeneric(mm, mm$strategies[[iRef + 1]])
-    cmp <- markovGeneric(mm, mm$strategies[[iCmp + 1]])
-    list(incCost = cmp$cost - ref$cost,
-         incEff = if (qaly) cmp$qaly - ref$qaly else ref$daly - cmp$daly)
-  })
+  P <- psaAll(m, N, cv, mode, params, seed, which = c(iRef + 1L, iCmp + 1L))
+  lapply(seq_len(nrow(P$C)), function(i) list(incCost = P$C[i, 2] - P$C[i, 1], incEff = P$E[i, 2] - P$E[i, 1]))
 }
 
 ceac <- function(d, ws) {
@@ -625,39 +601,63 @@ param_range <- function(p, base, kind) {
 }
 
 dsaModel <- function(m, w, iRef, iCmp, params = NULL) {
-  m <- fixModel(m)
-  qaly <- identical(m$outcome, "QALY") || is.null(m$outcome)
+  m <- prepareModel(m)
+  type <- model_type(m)
   nmbPair <- function(mm) {
-    mm <- resolve_effects(mm)
-    r <- markovGeneric(mm, mm$strategies[[iRef + 1]])
-    cc <- markovGeneric(mm, mm$strategies[[iCmp + 1]])
-    incE <- if (qaly) (cc$qaly - r$qaly) else (r$daly - cc$daly)
-    incE * w - (cc$cost - r$cost)
+    if (type == "markov") mm <- resolve_effects(mm)
+    r <- runStrategy(mm, iRef + 1L); cc <- runStrategy(mm, iCmp + 1L)
+    (nb_effect(mm, cc) - nb_effect(mm, r)) * w - (cc$cost - r$cost)
   }
   base <- nmbPair(m)
   specs <- list()
   add <- function(label, set, rg) specs[[length(specs) + 1]] <<- list(label = label, set = set, lo = rg$lo, hi = rg$hi, src = rg$src)
 
-  for (si in seq_along(m$strategies)) {
-    s <- m$strategies[[si]]
-    ac <- num(s$addCost)
-    pStr <- if (!is.null(params$strategies) && length(params$strategies) >= si) params$strategies[[si]] else NULL
-    if (ac > 0) local({ k <- si; add(paste0(s$name, " added cost"), function(mm, v) { mm$strategies[[k]]$addCost <- v; mm }, param_range(pStr$addCost, ac, "cost")) })
-    if (has_effect(s)) {
-      lo <- num(s$effect$lo, NA); hi <- num(s$effect$hi, NA)
-      if (!is.na(lo) && !is.na(hi)) local({ k <- si
-        add(paste0(s$name, " treatment effect (", toupper(if (is.null(s$effect$measure)) "hr" else s$effect$measure), ")"),
-            function(mm, v) { mm$strategies[[k]]$effect$value <- v; mm }, list(lo = lo, hi = hi, src = "95% CI")) })
+  if (type != "tree") {
+    for (si in seq_along(m$strategies)) {
+      s <- m$strategies[[si]]
+      ac <- num(s$addCost)
+      pStr <- if (!is.null(params$strategies) && length(params$strategies) >= si) params$strategies[[si]] else NULL
+      if (ac > 0) local({ k <- si; add(paste0(s$name, " added cost"), function(mm, v) { mm$strategies[[k]]$addCost <- v; mm }, param_range(pStr$addCost, ac, "cost")) })
+      if (type == "markov" && has_effect(s)) {
+        lo <- num(s$effect$lo, NA); hi <- num(s$effect$hi, NA)
+        if (!is.na(lo) && !is.na(hi)) local({ k <- si
+          add(paste0(s$name, " treatment effect (", toupper(if (is.null(s$effect$measure)) "hr" else s$effect$measure), ")"),
+              function(mm, v) { mm$strategies[[k]]$effect$value <- v; mm }, list(lo = lo, hi = hi, src = "95% CI")) })
+      }
+      if (type == "psm") for (ep in c("os", "pfs")) {
+        spec <- s[[ep]]
+        if (!is.null(spec$ref) && !is.na(num(spec$lo, NA)) && !is.na(num(spec$hi, NA))) local({ k <- si; e <- ep
+          add(paste0(s$name, " ", toupper(ep), " hazard ratio"), function(mm, v) { mm$strategies[[k]][[e]]$hr <- v; mm },
+              list(lo = num(spec$lo), hi = num(spec$hi), src = "95% CI")) })
+      }
+    }
+    for (si in seq_along(m$states)) {
+      st <- m$states[[si]]
+      cst <- num(st$cost); utl <- num(st$util)
+      pSt <- if (!is.null(params$states) && length(params$states) >= si) params$states[[si]] else NULL
+      if (cst > 0) local({ k <- si; add(paste0(st$name, " cost"), function(mm, v) { mm$states[[k]]$cost <- v; mm }, param_range(pSt$cost, cst, "cost")) })
+      if (utl > 0) local({ k <- si; add(paste0(st$name, " utility"), function(mm, v) { mm$states[[k]]$util <- v; mm }, param_range(pSt$util, utl, "util")) })
+    }
+    add("Discount rate, costs & effects", function(mm, v) { mm$dCost <- v; mm$dEff <- v; mm }, list(lo = 0, hi = 0.05, src = "scenario range"))
+  } else {
+    for (si in seq_along(m$strategies)) {
+      tp <- tree_parse(m$strategies[[si]])
+      for (i in seq_along(tp$nodes)) {
+        nd <- tp$nodes[[i]]
+        if (i != tp$root) {
+          sib <- which(tp$par == tp$par[i])
+          hasHash <- any(vapply(sib, function(j) identical(as.character(tp$nodes[[j]]$p), "#"), logical(1)))
+          pv <- num(nd$p, NA)
+          if (hasHash && !is.na(pv) && pv > 0 && pv < 1) local({ k <- si; ii <- i
+            add(paste0(tp$name, ": P(", nd$label, ")"), function(mm, v) { mm$strategies[[k]]$nodes[[ii]]$p <- v; mm },
+                list(lo = max(0, pv * 0.8), hi = min(1, pv * 1.2), src = "assumed \u00B120%")) })
+        }
+        cv0 <- num(nd$cost)
+        if (cv0 > 0) local({ k <- si; ii <- i
+          add(paste0(tp$name, ": cost of ", nd$label), function(mm, v) { mm$strategies[[k]]$nodes[[ii]]$cost <- v; mm }, param_range(NULL, cv0, "cost")) })
+      }
     }
   }
-  for (si in seq_along(m$states)) {
-    st <- m$states[[si]]
-    cst <- num(st$cost); utl <- num(st$util)
-    pSt <- if (!is.null(params$states) && length(params$states) >= si) params$states[[si]] else NULL
-    if (cst > 0) local({ k <- si; add(paste0(st$name, " cost"), function(mm, v) { mm$states[[k]]$cost <- v; mm }, param_range(pSt$cost, cst, "cost")) })
-    if (utl > 0) local({ k <- si; add(paste0(st$name, " utility"), function(mm, v) { mm$states[[k]]$util <- v; mm }, param_range(pSt$util, utl, "util")) })
-  }
-  add("Discount rate, costs & effects", function(mm, v) { mm$dCost <- v; mm$dEff <- v; mm }, list(lo = 0, hi = 0.05, src = "scenario range"))
 
   out <- lapply(specs, function(p) {
     nL <- tryCatch(nmbPair(p$set(m, p$lo)), input_error = function(e) NA_real_)
@@ -695,3 +695,13 @@ biaRun <- function(b) {
   }
   rows
 }
+
+# --- Further model types --------------------------------------------------------------
+# Survival analysis, partitioned survival and decision trees live in sibling
+# files, sourced from the same directory as this file.
+.engine_dir <- (function() {
+  for (i in rev(seq_len(sys.nframe()))) { f <- sys.frame(i)$ofile; if (!is.null(f)) return(dirname(f)) }
+  "."
+})()
+for (.f in c("engine_survival.R", "engine_models.R")) source(file.path(.engine_dir, .f), local = environment())
+rm(.f)

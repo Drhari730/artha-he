@@ -18,8 +18,9 @@ for the **Indian / LMIC** context (GDP-based WTP thresholds, DALYs, ₹, 3% disc
 | **Costing** | Micro-costing (bottom-up) & gross-costing (top-down), inflation, category breakdown, CSV import/template |
 | **Out-of-Pocket** | Direct patient spending and catastrophic-health-expenditure (CHE) checks (10% income / 40% capacity-to-pay) |
 | **Evaluation** | CMA · CEA · CUA · CBA · CCA, with a built-in **advisor** that recommends the right method and lists missing data; ICER, dominance, net benefit, CE plane |
-| **Modeling** | Fully **configurable Markov model** — any states, editable transition matrices, multiple strategies, **QALYs and DALYs**, cohort trace |
-| **Sensitivity** | Probabilistic SA (Dirichlet / Gamma / Beta sampling), CEAC, EVPI, one-way tornado |
+| **Survival** | Fit exponential, Weibull, Gompertz, log-logistic and log-normal curves (maximum likelihood, AIC/BIC) to patient-level data, or to a **published Kaplan-Meier curve** rebuilt with the Guyot et al. (2012) algorithm; extrapolate, and send the chosen curve to the model |
+| **Modeling** | Three model types: **Markov** (any states, matrices or treatment effects), **partitioned survival** (OS/PFS curves or hazard ratios, as in oncology HTA) and **decision trees** (screening, diagnostics, acute care); QALYs and DALYs |
+| **Sensitivity** | Probabilistic SA for every model type (Gamma / Beta / Dirichlet / multivariate-normal curve parameters / lognormal hazard ratios), CEAC for all strategies with the acceptability frontier, EVPI by threshold, one-way tornado |
 | **Budget Impact** | Multi-year annual & cumulative budget impact |
 | **Methods** | Every formula on display + a live engine-validation panel + glossary |
 
@@ -64,7 +65,7 @@ Rscript tests/run_tests.R
 Rscript validation/validate_darth.R
 ```
 
-The engine **reproduces the published DARTH Sick-Sicker base case** (all four strategies; costs to the dollar, QALYs to two decimals, the same ICERs). The `testthat` suite covers the Markov engine (DARTH, closed-form checks, Simpson weights, treatment effects, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
+The engine **reproduces the published DARTH Sick-Sicker base case** (all four strategies; costs to the dollar, QALYs to two decimals, the same ICERs). The `testthat` suite covers survival fitting (checked against R `survival::survreg` / `survfit`, and a Guyot round-trip), the partitioned survival model and decision trees (against independent calculations), multi-strategy CEAC/CEAF/EVPI, the Markov engine (DARTH, closed-form checks, Simpson weights, treatment effects, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
 
 ## Deploy (Railway)
 
@@ -76,7 +77,9 @@ The repo deploys with the `Dockerfile` (pinned `rocker/r-ver:4.4.1`):
 ## Project layout
 
 ```
-engine.R            # calculation engine (pure R)
+engine.R            # calculation engine (pure R): costing, Markov, PSA, DSA, BIA
+engine_survival.R   # survival fitting, Kaplan-Meier, Guyot reconstruction
+engine_models.R     # partitioned survival, decision trees, multi-strategy PSA
 plumber.R           # JSON API + report builder
 run.R               # starts the server (error handling, request-size limit)
 public/             # front end: index.html, app.js

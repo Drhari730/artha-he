@@ -152,7 +152,8 @@ function(req) {
 #* @post /api/model
 function(req) {
   m <- parse_req(req)
-  fixed <- fixModel(m)
+  fixed <- prepareModel(m)
+  mtype <- model_type(m)
   wtp <- num(m$wtp)
   isQ <- !identical(m$outcome, "DALY")
   res <- modelRunAll(fixed)
@@ -169,20 +170,29 @@ function(req) {
   as_idx <- if(!is.null(m$activeStrat)) as.numeric(m$activeStrat) + 1 else 1
   if (as_idx < 1 || as_idx > length(fixed$strategies)) as_idx <- 1
   as_strat <- fixed$strategies[[as_idx]]
-  trace <- markovGeneric(fixed, as_strat)$trace
-
-  series <- lapply(seq_along(m$states), function(si) {
+  trace <- if (mtype == "tree") NULL else runStrategy(fixed, as_idx)$trace
+  series <- if (is.null(trace)) list() else lapply(seq_along(m$states), function(si) {
     list(label=m$states[[si]]$name, idx=si-1, data=lapply(1:nrow(trace), function(t) { list(x=(t-1)*as.numeric(m$cycle), y=trace[t, si]) }))
   })
+  # PSM: OS and PFS curves of every strategy, for plotting
+  curves <- if (mtype == "psm") {
+    cyc <- num(m$cycle); tt <- (0:round(num(m$horizon) / cyc)) * cyc
+    lapply(seq_along(fixed$strategies), function(k) list(name = fixed$strategies[[k]]$name,
+      os = lapply(seq_along(tt), function(i) list(x = tt[i], y = curve_S(fixed, k, "os", tt[i]))),
+      pfs = lapply(seq_along(tt), function(i) list(x = tt[i], y = curve_S(fixed, k, "pfs", tt[i])))))
+  } else NULL
+  crossing <- vapply(res, function(s) isTRUE(s$crossing), logical(1))
   
   ce <- is.na(best$icer) || best$icer <= wtp
   interp <- list(
     paste0("Over a ", m$horizon, "-year horizon, ", best$name, " is optimal (highest net monetary benefit) at a willingness-to-pay of ", fmtINR(wtp), " per ", unit, if(is.na(best$icer)) " (the least-costly strategy on the frontier)" else paste0(", with an ICER of ", fmtINR(best$icer), " per ", unit), " - ", if(ce) "cost-effective" else "not cost-effective", " at this threshold."),
-    paste0("The cohort trace shows how the modelled population moves between the ", length(m$states), " health states over time; the cost-effectiveness plane summarises each strategy against the cheapest."),
+    if (mtype == "tree") "Each strategy's expected cost and outcome are the probability-weighted sums over the end branches of its tree; the cost-effectiveness plane summarises each strategy against the cheapest."
+    else if (mtype == "psm") paste0("In a partitioned survival model the overall-survival and progression-free-survival curves set the share of the cohort in each state over time.", if (any(crossing)) " Warning: PFS rises above OS for at least one strategy; it has been capped at OS. Check the curves." else "")
+    else paste0("The cohort trace shows how the modelled population moves between the ", length(m$states), " health states over time; the cost-effectiveness plane summarises each strategy against the cheapest."),
     "These are deterministic (point-estimate) results - run the Sensitivity tab (PSA) to see how parameter uncertainty changes the probability of cost-effectiveness."
   )
   
-  list(rows=inc, plane=plane, best=best, unit=unit, onFr=length(onFr), strategies=length(m$strategies), states=length(m$states), activeName=as_strat$name, series=series, stateNames=sapply(m$states, function(s) s$name), wtp=wtp, correction=fixed$correction, horizon=as.numeric(m$horizon), dCost=as.numeric(m$dCost), outcome=m$outcome, interpretation=interp)
+  list(rows=inc, plane=plane, best=best, unit=unit, onFr=length(onFr), strategies=length(m$strategies), states=length(m$states), activeName=as_strat$name, series=series, stateNames=sapply(m$states, function(s) s$name), wtp=wtp, type=mtype, curves=curves, crossing=any(crossing), correction=fixed$correction, horizon=as.numeric(m$horizon), dCost=as.numeric(m$dCost), outcome=m$outcome, interpretation=interp)
 }
 
 #* @serializer unboxedJSON
@@ -196,14 +206,35 @@ function(req) {
   cv <- if(num(p$cv) > 0) num(p$cv) else 0.2
   seed <- as.integer(num(p$seed, DEFAULT_SEED))
 
-  draws <- psaModel(p$model, N, iRef, iCmp, cv, p[["mode"]], p[["params"]], seed = seed)
+  mode <- if (model_type(p$model) == "markov") p[["mode"]] else "global"
+  P <- psaAll(p$model, N, cv, mode, p[["params"]], seed = seed)
+  draws <- lapply(seq_len(nrow(P$C)), function(i) list(incCost = P$C[i, iCmp + 1] - P$C[i, iRef + 1], incEff = P$E[i, iCmp + 1] - P$E[i, iRef + 1]))
   hiW <- max(1000000, 3 * wtp)
-  curve <- ceac(draws, seq(0, hiW, length.out = 41))
+  ws <- seq(0, hiW, length.out = 41)
+  curve <- ceac(draws, ws)
+  multi <- ceac_multi(P, ws)
   pCE <- mean(vapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0, logical(1)))
   ev <- evpi(draws, wtp)
-  tor <- dsaModel(p$model, wtp, iRef, iCmp, if (identical(p[["mode"]], "per_parameter")) p[["params"]] else NULL)
+  tor <- dsaModel(p$model, wtp, iRef, iCmp, if (identical(mode, "per_parameter")) p[["params"]] else NULL)
+  evM <- ceac_multi(P, wtp)$evpi[[1]]$evpi
 
-  list(pCE = pCE, evpi = ev, ceac = curve, draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, seed = seed, unit = if(identical(p$model$outcome, "DALY")) "DALY averted" else "QALY", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
+  list(pCE = pCE, evpi = ev, evpiAll = evM, ceac = curve, ceacMulti = multi$curves, ceaf = multi$frontier, evpiCurve = multi$evpi, mode = mode, nStrategies = ncol(P$C), draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, seed = seed, unit = if(identical(p$model$outcome, "DALY")) "DALY averted" else "QALY", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
+}
+
+#* @serializer unboxedJSON
+#* @options /api/survival
+#* @post /api/survival
+function(req) {
+  p <- parse_req(req)
+  ipd <- if (identical(p$mode, "km")) guyot_ipd(p$digitised, p$atRisk, p$totalEvents) else p$ipd
+  r <- surv_fit_all(ipd, horizon = p$horizon)
+  grid <- seq(0, r$horizon, length.out = 121)
+  r$curves <- lapply(r$fits, function(f) list(dist = f$dist, points = lapply(grid, function(t) list(x = t, y = surv_S(f$dist, unlist(f$par), t)))))
+  r$km <- lapply(seq_len(nrow(r$km)), function(i) as.list(r$km[i, ]))
+  r$reconstructed <- identical(p$mode, "km")
+  if (r$reconstructed) r$ipd <- ipd
+  r$unit <- if (is.null(p$unit)) "months" else p$unit
+  r
 }
 
 #* @serializer unboxedJSON
@@ -277,23 +308,34 @@ function(req) {
   m <- st$model
   if (include("modeling")) {
     add("Model inputs (study parameters)", safe({
-      f <- fixModel(m)
+      f <- prepareModel(m)
+      if (model_type(f) == "tree") {
+        rows <- unlist(lapply(f$strategies, function(s) lapply(s$nodes, function(nd) c(s$name, nd$label, as.character(if (is.null(nd$p)) "" else nd$p), fmtINR(num(nd$cost)), fmtNum(num(nd$effect), 3)))), recursive = FALSE)
+        return(tbl(c("Strategy","Branch","Probability","Cost","Outcome"), rows))
+      }
       stRows <- lapply(f$states, function(x) c(x$name, fmtINR(num(x$cost)), fmtNum(num(x$util), 3), fmtNum(num(x$dw), 3), if (isAbs(x)) "Yes" else "No"))
       sgRows <- lapply(f$strategies, function(x) {
-        tr <- if (has_effect(x)) paste0(toupper(if (is.null(x$effect$measure)) "hr" else x$effect$measure), " ", fmtNum(num(x$effect$value), 2),
+        tr <- if (model_type(f) == "psm") {
+          cv <- function(ep) { sp <- x[[ep]]; if (!is.null(sp$ref)) paste0("HR ", fmtNum(num(sp$hr), 2), " vs '", f$strategies[[num(sp$ref) + 1]]$name, "'")
+            else paste0(SURV_LABELS[[sp$dist]], " (", paste(names(sp$par), vapply(sp$par, function(v) formatC(num(v), digits = 4, format = "g"), ""), sep = " ", collapse = ", "), "; ", if (is.null(sp$unit)) "years" else sp$unit, ")") }
+          paste0("OS: ", cv("os"), ". PFS: ", cv("pfs"), ".")
+        } else if (has_effect(x)) paste0(toupper(if (is.null(x$effect$measure)) "hr" else x$effect$measure), " ", fmtNum(num(x$effect$value), 2),
                  if (!is.na(num(x$effect$lo, NA))) paste0(" (95% CI ", fmtNum(num(x$effect$lo), 2), "-", fmtNum(num(x$effect$hi), 2), ")") else "",
                  " on ", length(x$effect$transitions), " transition(s) of '", f$strategies[[num(x$effect$baseline) + 1]]$name, "'") else "Own transition matrix"
         c(x$name, fmtINR(num(x$addCost)), tr)
       })
-      paste0(tbl(c("Health state","Cost / cycle","Utility","Disability weight","Absorbing"), stRows),
-             tbl(c("Strategy","Added cost / cycle","Transitions"), sgRows))
+      paste0(tbl(c("Health state","Cost / year","Utility","Disability weight","Absorbing"), stRows),
+             tbl(c("Strategy","Treatment cost / year","Transitions / curves"), sgRows))
     }))
     add("Decision-analytic model", safe({
       isQ <- !identical(m$outcome, "DALY")
       res <- modelRunAll(m)
       res <- lapply(res, function(s){ s$eff <- if(isQ) s$qaly else s$daly; s })
       minc <- modelIncremental(res, !isQ)
-      paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting, ", if (identical(m$correction, "simpson")) "Simpson's 1/3" else "half-cycle", " within-cycle correction. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>",
+      mt <- model_type(m)
+      if (mt == "tree") return(paste0("<p>Decision tree, ", length(m$strategies), " strategies. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>",
+             tbl(c("Strategy","Expected cost","Expected outcome","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(if (isQ) s$qaly else s$daly, 3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status)))))
+      paste0("<p>", if (mt == "psm") "Partitioned survival model (progression-free, progressed, dead)" else paste0(length(m$states), "-state Markov"), ", ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting, ", if (identical(m$correction, "simpson")) "Simpson's 1/3" else "half-cycle", " within-cycle correction. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>",
              tbl(c("Strategy","Cost","Life-years","QALYs","DALYs","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$ly,3), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))),
              "<p>Undiscounted totals:</p>",
              tbl(c("Strategy","Cost","Life-years","QALYs"), lapply(res, function(s) c(s$name, fmtINR(s$undisc$cost), fmtNum(s$undisc$ly,3), fmtNum(s$undisc$qaly,3)))))
@@ -307,7 +349,7 @@ function(req) {
     draws <- psaModel(m, nIt, pr[1], pr[2], cvv, st$sens[["mode"]], st$sens[["params"]], seed = seed)
     pCE <- mean(vapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0, logical(1)))
     ev <- evpi(draws, wtp)
-    tor <- dsaModel(m, wtp, pr[1], pr[2], if (identical(st$sens[["mode"]], "per_parameter")) st$sens[["params"]] else NULL)
+    tor <- dsaModel(m, wtp, pr[1], pr[2], if (identical(st$sens[["mode"]], "per_parameter") && model_type(m) == "markov") st$sens[["params"]] else NULL)
     paste0("<p>Probabilistic sensitivity analysis (", nIt, " iterations, seed ", seed, "). Probability cost-effective at ", fmtINR(wtp), ": <b>", pct(pCE), "</b>. EVPI per patient: <b>", fmtINR(ev), "</b>.</p>",
            if (length(tor)) paste0("<p>One-way sensitivity analysis (net monetary benefit at ", fmtINR(wtp), "):</p>",
              tbl(c("Parameter","Range","Source","NMB at low","NMB at high"), lapply(tor, function(t) c(t$label, paste0(fmtNum(t$loVal, 3), " - ", fmtNum(t$hiVal, 3)), t$source, fmtINR(t$nmbAtLo), fmtINR(t$nmbAtHi))))) else "")
@@ -362,7 +404,7 @@ function(req) {
   o <- oopRun(list(income = 200000, nonFood = 120000, items = list(list(item="x", category="Direct medical", amount=47000))))
   v[[5]] <- list(n = "OOP ₹47,000 / income ₹2,00,000", got = pct(o$pctInc), exp = "23.5%", ok = ap(o$pctInc * 100, 23.5))
   
-  if (!is.null(payload$model)) {
+  if (!is.null(payload$model) && identical(tryCatch(model_type(payload$model), error = function(e) ""), "markov")) {
     fixed <- fixModel(payload$model)
     arm <- markovGeneric(fixed, fixed$strategies[[1]])
     last_row <- arm$trace[nrow(arm$trace), ]
@@ -392,6 +434,19 @@ function(req) {
   okD <- all(vapply(1:4, function(k) abs(dr[[k]]$cost - darth_published$cost[[k]]) < 1 && round(dr[[k]]$qaly, 2) == darth_published$qaly[[k]], logical(1)))
   icB <- (dr[[3]]$cost - dr[[1]]$cost) / (dr[[3]]$qaly - dr[[1]]$qaly)
   v[[length(v)+1]] <- list(n = "DARTH Sick-Sicker: published costs, QALYs and ICER (4 strategies)", got = paste0("ICER B $", formatC(icB, format = "f", big.mark = ",", digits = 0)), exp = "ICER B $73,279", ok = okD && abs(icB - darth_published$icer[["B"]]) < 1)
+
+  # Partitioned survival with exponential curves = closed form (half-cycle, no discounting).
+  psm <- list(type = "psm", cycle = 1, horizon = 10, dCost = 0, dEff = 0, outcome = "QALY",
+              states = list(list(name = "PF", cost = 0, util = 1), list(name = "PD", cost = 0, util = 0.5), list(name = "D", cost = 0, util = 0)),
+              strategies = list(list(name = "x", addCost = 0, os = list(dist = "exponential", par = list(rate = 0.1)), pfs = list(dist = "exponential", par = list(rate = 0.2)))))
+  tt <- 0:10; ww <- c(0.5, rep(1, 9), 0.5); qx <- sum(ww * (exp(-0.2 * tt) + 0.5 * (exp(-0.1 * tt) - exp(-0.2 * tt))))
+  qp <- modelRunAll(psm)[[1]]$qaly
+  v[[length(v)+1]] <- list(n = "Partitioned survival QALYs = closed form (exponential OS/PFS)", got = fmtNum(qp, 6), exp = fmtNum(qx, 6), ok = abs(qp - qx) < 1e-9)
+
+  # Decision tree roll-back.
+  nd <- function(id, parent, p, cost = 0, effect = 0) list(id = id, parent = parent, label = id, p = p, cost = cost, effect = effect)
+  tr <- modelRunAll(list(type = "tree", strategies = list(list(name = "t", nodes = list(nd("r", "", 1, 100), nd("a", "r", 0.3, 50, 1), nd("b", "r", "#", 0, 0.5))))))[[1]]
+  v[[length(v)+1]] <- list(n = "Decision tree: expected cost 100 + 0.3\u00D750 and outcome 0.3 + 0.7\u00D70.5", got = paste0(fmtINR(tr$cost), ", ", fmtNum(tr$qaly, 2)), exp = "\u20B9115, 0.65", ok = abs(tr$cost - 115) < 1e-9 && abs(tr$qaly - 0.65) < 1e-9)
 
   # PSA keeps absorbing states absorbing (no resurrection from Dead).
   set.seed(1); dr <- psaDraw(fixModel(two), 0.3, "global", NULL)$strategies[[1]]$matrix
