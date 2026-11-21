@@ -14,6 +14,7 @@ for the **Indian / LMIC** context (GDP-based WTP thresholds, DALYs, ₹, 3% disc
 
 | Module | What it does |
 |--------|--------------|
+| **★ Project (start here)** | Describe the decision (population, intervention, comparators, outcome, perspective). Artha recommends the method, applies the reference case (India: HTAIn-style defaults), and guides you step by step, with progress, plain-language checks and an auto-filled **CHEERS 2022** checklist |
 | **Costing** | Micro-costing (bottom-up) & gross-costing (top-down), inflation, category breakdown, CSV import/template |
 | **Out-of-Pocket** | Direct patient spending and catastrophic-health-expenditure (CHE) checks (10% income / 40% capacity-to-pay) |
 | **Evaluation** | CMA · CEA · CUA · CBA · CCA, with a built-in **advisor** that recommends the right method and lists missing data; ICER, dominance, net benefit, CE plane |
@@ -24,6 +25,14 @@ for the **Indian / LMIC** context (GDP-based WTP thresholds, DALYs, ₹, 3% disc
 
 Plus: **Save/Load projects**, a one-click **combined CHEERS report** (PDF/Word),
 and per-analysis export to **Excel (.xlsx) / Word / PDF / PNG**.
+
+## One guided flow
+
+Question → Costs → Outcomes → Evaluation (quick) or Model + Uncertainty (full) → Patient burden → Budget impact → Report.
+
+- **Quick or full:** compare summary totals in minutes, or build a Markov model with PSA for a formal submission. Both live in the same project.
+- **Nothing typed twice:** every result (a cost, a QALY, a utility, a transition probability, a model's results) has a **Use this result** button that sends it to the step that needs it. Artha records where each value came from, and the report lists it.
+- **Submission-ready report:** includes only the analyses you ran, plus the decision problem, a model-inputs table, undiscounted results, the DSA table, where each input came from, and the CHEERS 2022 checklist.
 
 ## How it's built
 

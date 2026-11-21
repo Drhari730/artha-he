@@ -123,7 +123,7 @@ function wireExports(title){document.querySelectorAll("#workspace [data-exp]").f
 /* ---------- unified CHEERS report (built on the server, opened client-side) ---------- */
 async function openReport(){
   let body;
-  try{ body=(await api("report",state)).html; }catch(e){ alert("Could not generate the report: "+((e&&e.message)||e)); return; }
+  try{ body=(await api("report",typeof reportPayload==="function"?reportPayload():state)).html; }catch(e){ alert("Could not generate the report: "+((e&&e.message)||e)); return; }
   const wordDoc='<html xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>body{font-family:Arial}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:5px;font-size:12px}h1{color:#241F46}h2{color:#5B4BD6}</style></head><body>'+body+'</body></html>';
   const wordHref="data:application/msword;base64,"+btoa(unescape(encodeURIComponent(wordDoc)));
   const css=`body{font-family:Arial,Helvetica,sans-serif;color:#1A1733;max-width:900px;margin:0 auto;padding:30px;line-height:1.55;}h1{font-size:24px;border-bottom:3px solid #C8971F;padding-bottom:8px;}h2{font-size:17px;color:#5B4BD6;margin-top:26px;border-left:4px solid #5B4BD6;padding-left:10px;}table{border-collapse:collapse;width:100%;margin:10px 0 18px;font-size:13px;}th,td{border:1px solid #ccc;padding:6px 9px;text-align:right;}th:first-child,td:first-child{text-align:left;}th{background:#F3F2F8;}.meta{font-size:12px;color:#666;}.foot{margin-top:30px;font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px;}.rtoolbar{position:sticky;top:0;background:#1A1733;padding:12px;margin:-30px -30px 22px;display:flex;gap:12px;align-items:center;}.rtoolbar button,.rtoolbar a{background:#5B4BD6;color:#fff;border:none;padding:9px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;font-family:Arial;}.rtoolbar .t{color:#B9B5D4;font-size:12px;margin-left:auto;}@media print{.no-print{display:none!important;}body{padding:0;max-width:none;}}`;
@@ -185,6 +185,7 @@ function tornado(rows){const W=680,rh=50,H=rows.length*rh+38,padL=230,mid=padL+(
 const state={
   module:"home",
   settings:{gdp:GDP_DEFAULT},
+  project:{refCase:"htain",setting:"India"},runs:{},provenance:{},
   costing:{method:"micro",toYear:2024,inflation:.05,rows:[],totalCost:0,output:0,
     adv:{discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]}},
   oop:{income:0,nonFood:0,items:[]},
@@ -416,7 +417,7 @@ function renderLanding(){
     <div style="text-align:center;margin-top:36px"><button class="btn btn-primary btn-lg" id="enterBottom">Enter the Workbench →</button></div>
     <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching<br><b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
   </div>`;
-  const enter=()=>enterApp("costing");
+  const enter=()=>enterApp("project");
   document.getElementById("enterTop").onclick=enter;
   document.getElementById("enterBottom").onclick=enter;
   document.getElementById("ctaStart").onclick=enter;
@@ -494,11 +495,12 @@ async function renderCosting(){
   if(c.method==="gross"&&!(+c.output>0))return emptyState("Costing","Enter the total cost of the service and the number of output units, then Calculate.");
   wsBusy("Costing");
   let res;try{res=await api("costing",c);}catch(e){return wsError(e);}
+  markRun("costing");
   if(res.method==="gross"){const per=res.per;
     ws.innerHTML=`<div class="ws-head"><div><h2>Gross costing</h2><div class="sub">Top-down: total expenditure ÷ output units.</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi gold"><div class="k-label">Cost per unit</div><div class="k-val">${compactINR(per)}</div><div class="k-sub">over ${fmtNum(res.output,0)} units</div></div></div>
       <div class="card"><h3>Calculation</h3><table class="results-table"><tbody><tr><td>Total cost</td><td>${fmtINR(res.total)}</td></tr><tr><td>Output units</td><td>${fmtNum(res.output,0)}</td></tr><tr><td>Average cost per unit</td><td>${fmtINR(per,2)}</td></tr></tbody></table></div>`;
-    wireExports("Artha Gross Costing");return;}
+    wireExports("Artha Gross Costing");ws.insertAdjacentHTML("beforeend",useCard("cost",res.per,"the cost per unit","Gross costing",fmtINR));return;}
   if(res.method==="advanced"){
     const bars=res.breakdown.map((b,i)=>({label:b.component,value:b.amount,tag:compactINR(b.amount)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
     const brk=res.breakdown.map(b=>`<tr><td>${b.component}</td><td>${fmtINR(b.amount)}</td><td>${pct(b.share)}</td></tr>`).join("");
@@ -521,7 +523,7 @@ async function renderCosting(){
       `The total annual cost is ${fmtINR(res.total)} (${compactINR(res.perUnit)} per unit). ${res.breakdown.length?res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].component+" is the largest component ("+pct(res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].share)+").":""}`,
       `Staff time is apportioned from monthly salary (salary ÷ ${res.monthlyHours} hrs × hours used); equipment is converted to an equivalent annual cost using the annualisation factor at ${pct(res.discount,0)}, so one-off purchases are spread fairly over their useful life.`,
       `State your perspective, price year and the source of each unit cost/salary when reporting; annualisation and apportioning assumptions should be given in a methods table.`
-    ]));
+    ])+useCard("cost",res.perUnit,"the cost per unit","Advanced costing",fmtINR));
     return;}
   const bars=res.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
   const lr=res.lines.map(l=>`<tr><td>${l.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${l.category}</td><td>${fmtNum(l.quantity,0)}</td><td>${fmtINR(l.unit_cost_adj,0)}</td><td>${fmtINR(l.line_cost,0)}</td></tr>`).join("");
@@ -531,6 +533,7 @@ async function renderCosting(){
     <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>Cost by category</h3><div class="card-sub">Share of total across perspective categories.</div>${barChartH(bars)}</div></div></div>
     <div class="pane" data-pane="lines"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Qty</th><th>Unit (adj)</th><th>Line cost</th></tr></thead><tbody>${lr}</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td>${fmtINR(res.total)}</td></tr></tfoot></table></div></div></div>`;
   wireTabs("costTabs");wireExports("Artha Micro Costing");
+  ws.insertAdjacentHTML("beforeend",useCard("cost",res.total,"the total cost","Micro-costing ("+c.toYear+" prices)",fmtINR));
 }
 
 /* ============================ OOP ============================ */
@@ -561,6 +564,7 @@ async function renderOop(){
   if(!o.items||!o.items.length)return emptyState("Out-of-pocket expenditure","Add the direct payments the patient/household makes (consultation, drugs, tests, transport, lost income) — or load an example — then Calculate.");
   wsBusy("Out-of-pocket");
   let r;try{r=await api("oop",o);}catch(e){return wsError(e);}
+  markRun("oop");
   const bars=r.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
   const flag=(v,t)=>`<span class="tag ${v?"dominated":"frontier"}">${v?"Yes":"No"}</span> ${t}`;
   const it=r.items.map(i=>`<tr><td>${i.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${i.category}</td><td>${fmtINR(i.amount)}</td></tr>`).join("");
@@ -621,6 +625,7 @@ async function renderEval(){
   if(!e.strats||!e.strats.length)return emptyState(t.name+" ("+t.abbr+")","Add the options you are comparing with their cost and effect (e.g. QALYs) — or build the effect in the Value Builder, or load an example — then Analyse.");
   wsBusy(t.name);
   let R;try{R=await api("evaluation",e);}catch(err){return wsError(err);}
+  markRun("evaluation");
   let head=`<div class="ws-head"><div><h2>${t.name} (${t.abbr})</h2><div class="sub">${t.def}</div></div>${EXPORT_BAR}</div>`;
   if(e.type==="CBA"){
     const d=R.rows,best=R.best;const bars=d.map(s=>({label:s.strategy,value:s.net,color:s.strategy===best.strategy?C.emerald:C.primary}));
@@ -776,6 +781,7 @@ async function renderModel(){
   if(!(m.states.some(s=>+s.util>0||+s.cost>0)||m.strategies.some(s=>+s.addCost>0)))return emptyState("Decision-analytic modeling","Define your health states (cost, utility, disability weight) and fill each strategy's transition matrix in the panel on the left — or load a worked example — then Run model.");
   wsBusy("Markov model");
   let R;try{R=await api("model",m);}catch(e){return wsError(e);}
+  markRun("modeling");
   const inc=R.rows,best=R.best,unit=R.unit,lowerBetter=m.outcome==="DALY";
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
   const incRows=inc.map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.ly,3)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
@@ -791,6 +797,7 @@ async function renderModel(){
     <div class="card"><h3>Undiscounted totals</h3><div class="card-sub">CHEERS 2022 asks for both discounted and undiscounted results.</div><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Life-years</th><th>QALYs</th><th>Discounted cost</th><th>Discounted LYs</th><th>Discounted QALYs</th></tr></thead><tbody>${inc.map(r=>`<tr><td>${escHTML(r.name)}</td><td>${fmtINR(r.undisc?r.undisc.cost:0)}</td><td>${fmtNum(r.undisc?r.undisc.ly:0,3)}</td><td>${fmtNum(r.undisc?r.undisc.qaly:0,3)}</td><td>${fmtINR(r.cost)}</td><td>${fmtNum(r.ly,3)}</td><td>${fmtNum(r.qaly,3)}</td></tr>`).join("")}</tbody></table></div></div></div>`;
   ws.querySelector('[data-pane="inc"]').insertAdjacentHTML("afterend",det);
   wireTabs("mTabs");wireExports("Artha Markov Model");addInterp(R);
+  ws.insertAdjacentHTML("beforeend",modelToEvalCard(R.rows,m.outcome));
 }
 
 /* ============================ SENSITIVITY ============================ */
@@ -878,6 +885,7 @@ async function renderSens(){
   if(!(m.states.some(x=>+x.util>0||+x.cost>0)||m.strategies.some(x=>+x.addCost>0)))return emptyState("Sensitivity analysis","This runs on the Markov model. First set up the model in the Modeling tab (or load an example there), then come back and Run analysis.");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
   let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed});}catch(e){return wsError(e);}
+  markRun("sensitivity");
   const unit=R.unit;
   const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)}: Gamma costs (state and treatment), Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept); treatment effects lognormal from their 95% CI.`;
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
@@ -912,6 +920,7 @@ async function renderBia(){
   if(!(+b.population>0&&+b.costNew>0))return emptyState("Budget impact analysis","Enter the catchment population, eligible share, uptake, and the current vs new cost per patient — or load an example — then Project budget.");
   wsBusy("Budget impact");
   let R;try{R=await api("bia",b);}catch(e){return wsError(e);}
+  markRun("bia");
   const rows=R.rows,totalImpact=R.cumulative;
   const bars=rows.map(r=>({label:r.year,value:r.impact,color:C.primary}));
   const tr=rows.map(r=>`<tr><td>${r.year}</td><td>${pct(r.uptake)}</td><td>${fmtNum(r.treated,0)}</td><td>${compactINR(r.worldNew)}</td><td>${compactINR(r.impact)}</td><td>${compactINR(r.cum)}</td></tr>`).join("");
@@ -928,7 +937,7 @@ function saveLocal(){try{localStorage.setItem("arthaHE_v2",JSON.stringify(state)
 function deepMerge(target,src){if(src===null||src===undefined)return target;if(Array.isArray(target))return Array.isArray(src)?src:target;if(typeof target==="object"){if(typeof src!=="object"||Array.isArray(src))return target;for(const k in src){if(k in target&&target[k]&&typeof target[k]==="object"&&!Array.isArray(target[k])){deepMerge(target[k],src[k]);}else{target[k]=src[k];}}return target;}return src===undefined?target:src;}
 function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=scrub(JSON.parse(s));Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}if(!state.settings)state.settings={gdp:GDP_DEFAULT};syncGdp();}
 function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
-function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=scrub(JSON.parse(rd.result));Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};if(!state.settings)state.settings={gdp:GDP_DEFAULT};syncGdp();saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
+function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=scrub(JSON.parse(rd.result));Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};if(!state.settings)state.settings={gdp:GDP_DEFAULT};syncGdp();saveLocal();enterApp("project");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
 
 /* ============================ GLOSSARY ============================ */
 const GLOSSARY={
@@ -1133,13 +1142,13 @@ function renderVb(){
       <div class="result-tabs" id="vbTabs"><button class="result-tab active" data-p="chart">By state</button><button class="result-tab" data-p="tbl">Breakdown</button></div>
       <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>QALY contribution by state</h3><div class="card-sub">How each health state adds to the total (discounted).</div>${barChartH(bars)}</div></div></div>
       <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>State</th><th>Utility</th><th>Years</th><th>Disc. QALYs</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>Total</td><td></td><td>${fmtNum(r.ly,1)}</td><td>${fmtNum(r.disc,3)}</td></tr></tfoot></table></div></div></div>`;
-    wireTabs("vbTabs");wireExports("Artha QALY Builder");
+    wireTabs("vbTabs");wireExports("Artha QALY Builder");markRun("vb");
     document.getElementById("qSend").onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(r.disc,2)+" QALY)",cost:0,effect:+r.disc.toFixed(3)});route("evaluation");};
     document.getElementById("workspace").insertAdjacentHTML("beforeend",interpCard([
       `A patient in these states accrues ${fmtNum(r.disc,3)} discounted QALYs (${fmtNum(r.ly,1)} life-years at an average utility of ${fmtNum(r.undisc/(r.ly||1),2)}).`,
       `Enter ${fmtNum(r.disc,3)} as the QALYs (effect) for this option in the Evaluation tab, and build the comparator the same way — the difference drives the ICER.`,
       `Utilities should come from a validated instrument (e.g. EQ-5D with a country value set) or a published catalogue; state your source and discount rate when reporting.`
-    ])+vbGuideCard("qaly")+vbRefsCard("qaly"));
+    ])+useCard("effect",r.disc,"the discounted QALYs","QALY builder",x=>fmtNum(x,3))+vbGuideCard("qaly")+vbRefsCard("qaly"));
     return;
   }
   if(v.tool==="util"){
@@ -1150,7 +1159,7 @@ function renderVb(){
       <div class="kpis"><div class="kpi accent"><div class="k-label">Net utility</div><div class="k-val">${fmtNum(net,3)}</div><div class="k-sub">0 = dead · 1 = full health</div></div><div class="kpi"><div class="k-label">Baseline</div><div class="k-val mono">${fmtNum(v.util.baseline,2)}</div></div><div class="kpi gold"><div class="k-label">Total disutility</div><div class="k-val mono">−${fmtNum(totDec,2)}</div></div></div>
       <div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Component</th><th>Value</th></tr></thead><tbody><tr><td>Baseline utility</td><td>${fmtNum(v.util.baseline,2)}</td></tr>${rows}<tr style="font-weight:700"><td>Net utility</td><td>${fmtNum(net,3)}</td></tr></tbody></table></div>
       <p class="note">Indicative catalogue values are starting points — confirm the utility for your exact condition, instrument and population from a published source.</p></div>`;
-    document.getElementById("workspace").insertAdjacentHTML("beforeend",vbGuideCard("util")+vbRefsCard("util"));
+    markRun("vb");document.getElementById("workspace").insertAdjacentHTML("beforeend",(v.util.baseline>0?useCard("utility",net,"the net utility","Utility helper",x=>fmtNum(x,3)):"")+vbGuideCard("util")+vbRefsCard("util"));
     wireExports("Artha Utility");
     return;
   }
@@ -1171,7 +1180,7 @@ function renderVb(){
     wireExports("Artha Life-years");
     document.getElementById("lSendQaly").onclick=()=>{v.qaly.rows.push({label:"Survival period",util:L.util>0?L.util:0.8,years:+L.discLY.toFixed(2)});v.tool="qaly";renderVbSidebar();renderVb();};
     const se=document.getElementById("lSendEval");if(se)se.onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(L.qaly,2)+" QALY)",cost:0,effect:+L.qaly.toFixed(3)});route("evaluation");};
-    document.getElementById("workspace").insertAdjacentHTML("beforeend",vbGuideCard("ly")+vbRefsCard("ly"));
+    markRun("vb");document.getElementById("workspace").insertAdjacentHTML("beforeend",(L.util>0?useCard("effect",L.qaly,"the discounted QALYs","Survival → life-years",x=>fmtNum(x,3)):useCard("effect",L.discLY,"the discounted life-years","Survival → life-years",x=>fmtNum(x,3)))+vbGuideCard("ly")+vbRefsCard("ly"));
     return;
   }
   // prob
@@ -1182,8 +1191,9 @@ function renderVb(){
   ws.innerHTML=`<div class="ws-head"><div><h2>Transition-probability builder</h2><div class="sub">Convert the evidence you have into the per-cycle probability your Markov model needs.</div></div></div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">${title}</div><div class="k-val mono">${fmtNum(out,4)}</div><div class="k-sub">per-cycle probability</div></div></div>
     <div class="card"><h3>How this was derived</h3><p style="font-size:14px;line-height:1.6;color:var(--ink-soft)">${note}</p>
-    <p class="note">Enter this value in the transition matrix (Modeling tab). Remember each row of the matrix must sum to 1.</p></div>
-    ${vbGuideCard("prob")}${vbRefsCard("prob")}`;
+    <p class="note">Send it to a cell of the transition matrix below; the probability of staying in that state is adjusted so the row still sums to 1.</p></div>
+    ${useCard("prob",out,"the per-cycle probability",title,x=>fmtNum(x,4))}${vbGuideCard("prob")}${vbRefsCard("prob")}`;
+  markRun("vb");
 }
 
 /* ============================ REFERENCE DATA (India / LMIC) ============================ */
@@ -1254,7 +1264,8 @@ function route(mod){
   const layout=document.getElementById("layout");
   if(mod==="methods"||mod==="reference"){layout.classList.add("full");(mod==="methods"?renderMethods:renderReference)();window.scrollTo(0,0);saveLocal();return;}
   layout.classList.remove("full");
-  ({costing:()=>{renderCostingSidebar();renderCosting();},
+  ({project:()=>{renderProjectSidebar();renderProject();},
+    costing:()=>{renderCostingSidebar();renderCosting();},
     oop:()=>{renderOopSidebar();renderOop();},
     evaluation:()=>{renderEvalSidebar();renderEval();},
     modeling:()=>{renderModelSidebar();renderModel();},

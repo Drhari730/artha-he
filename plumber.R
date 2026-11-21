@@ -225,60 +225,113 @@ function(req) {
     b <- paste0(vapply(rows, function(r) paste0("<tr>", paste0("<td>", esc(r), "</td>", collapse=""), "</tr>"), character(1)), collapse="")
     paste0("<table>", h, b, "</table>")
   }
-  # 1 Costing
-  cst <- st$costing
-  if (!is.null(cst$method) && cst$method == "gross") {
-    per <- if (as.numeric(cst$output) > 0) as.numeric(cst$totalCost)/as.numeric(cst$output) else 0
-    costSec <- paste0("<p>Gross (top-down) costing.</p>", tbl(c("Metric","Value"), list(c("Total cost", fmtINR(as.numeric(cst$totalCost))), c("Output units", fmtNum(as.numeric(cst$output),0)), c("Cost per unit", fmtINR(per)))))
-  } else if (!is.null(cst$method) && cst$method == "advanced") {
-    ac <- advancedCost(cst$adv)
-    costSec <- paste0("<p>Advanced (activity-based) costing. <b>Total: ", fmtINR(ac$total), "</b> (", fmtINR(ac$perUnit), " per unit).</p>", tbl(c("Component","Amount","Share"), lapply(ac$breakdown, function(x) c(x$component, fmtINR(x$amount), pct(x$share)))))
-  } else {
-    r <- microCost(cst$rows, as.numeric(cst$toYear), as.numeric(cst$inflation))
-    costSec <- paste0("<p>Micro (bottom-up) costing, ", esc(cst$toYear), " prices. <b>Total cost: ", fmtINR(r$total), "</b>.</p>", tbl(c("Category","Cost","Share"), lapply(r$byCat, function(x) c(x$category, fmtINR(x$cost), pct(x$share)))))
+  # Sections are included when the user has run that analysis (st$runs, sent by
+  # the app); older clients without st$runs get every section. A section that
+  # fails shows its error instead of breaking the whole report.
+  runs <- st$runs
+  include <- function(k) is.null(runs) || !is.null(runs[[k]])
+  safe <- function(expr) tryCatch(expr, error = function(e) paste0("<p><i>Could not compute this section: ", esc(conditionMessage(e)), "</i></p>"))
+  secs <- list()
+  add <- function(title, body) secs[[length(secs) + 1]] <<- list(title = title, body = body)
+
+  # 0 Decision problem
+  pj <- st$project
+  if (!is.null(pj) && !is.null(pj$title) && nzchar(pj$title)) {
+    row <- function(k, v) if (!is.null(v) && nzchar(as.character(v))) list(c(k, as.character(v))) else list()
+    rows <- c(row("Decision question", pj$objective), row("Population", pj$population), row("Intervention", pj$intervention),
+              row("Comparator(s)", pj$comparators), row("Main outcome", pj$outcomeLabel), row("Method", pj$method),
+              row("Perspective", pj$perspectiveLabel), row("Setting", pj$setting), row("Reference case", pj$refCaseLabel),
+              row("Level of detail", if (identical(pj$scale, "full")) "Full: decision model with uncertainty analysis" else if (identical(pj$scale, "quick")) "Quick: summary-level comparison" else NULL))
+    add("Decision problem", if (length(rows)) tbl(c("Item", "Description"), rows) else "<p>-</p>")
   }
-  # 2 OOP
-  o <- oopRun(st$oop)
-  oopSec <- paste0("<p>Total out-of-pocket: <b>", fmtINR(o$total), "</b>, of which direct medical (health) payments ", fmtINR(o$health), " = ", pct(o$pctInc), " of household consumption/income. Catastrophic at 10%: <b>", if(o$che10) "Yes" else "No", "</b>; at 40% capacity-to-pay: <b>", if(o$che40) "Yes" else "No", "</b> (SDG 3.8.2 / WHO: health payments only).</p>")
-  # 3 Evaluation
-  e <- st$evaluation
-  if (e$type == "CEA" || e$type == "CUA") {
-    inc <- icerIncremental(e$strats)
-    evalSec <- paste0("<p>", esc(e$type), ", WTP ", fmtINR(num(e$wtp)), ".</p>", tbl(c("Strategy","Cost","Effect","ICER","Status"), lapply(inc, function(s) c(s$strategy, fmtINR(s$cost), fmtNum(s$effect,2), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
-  } else {
-    evalSec <- paste0("<p>", esc(e$type), " analysis.</p>", tbl(c("Strategy","Cost","Outcome"), lapply(e$strats, function(s) c(s$strategy, fmtINR(as.numeric(s$cost)), fmtNum(as.numeric(s$effect),2)))))
-  }
-  # 4 Model
+
+  if (include("costing")) add("Costing", safe({
+    cst <- st$costing
+    if (!is.null(cst$method) && cst$method == "gross") {
+      per <- if (num(cst$output) > 0) num(cst$totalCost) / num(cst$output) else 0
+      paste0("<p>Gross (top-down) costing.</p>", tbl(c("Metric","Value"), list(c("Total cost", fmtINR(num(cst$totalCost))), c("Output units", fmtNum(num(cst$output),0)), c("Cost per unit", fmtINR(per)))))
+    } else if (!is.null(cst$method) && cst$method == "advanced") {
+      ac <- advancedCost(cst$adv)
+      paste0("<p>Advanced (activity-based) costing. <b>Total: ", fmtINR(ac$total), "</b> (", fmtINR(ac$perUnit), " per unit).</p>", tbl(c("Component","Amount","Share"), lapply(ac$breakdown, function(x) c(x$component, fmtINR(x$amount), pct(x$share)))))
+    } else {
+      r <- microCost(cst$rows, num(cst$toYear, NA), num(cst$inflation))
+      paste0("<p>Micro (bottom-up) costing, ", esc(cst$toYear), " prices. <b>Total cost: ", fmtINR(r$total), "</b>.</p>", tbl(c("Category","Cost","Share"), lapply(r$byCat, function(x) c(x$category, fmtINR(x$cost), pct(x$share)))))
+    }
+  }))
+
+  if (include("oop")) add("Out-of-pocket &amp; catastrophic expenditure", safe({
+    o <- oopRun(st$oop)
+    paste0("<p>Total out-of-pocket: <b>", fmtINR(o$total), "</b>, of which direct medical (health) payments ", fmtINR(o$health), " = ", pct(o$pctInc), " of household consumption/income. Catastrophic at 10%: <b>", if(o$che10) "Yes" else "No", "</b>; at 40% capacity-to-pay: <b>", if(o$che40) "Yes" else "No", "</b> (SDG 3.8.2 / WHO: health payments only).</p>")
+  }))
+
+  if (include("evaluation") && length(st$evaluation$strats) > 0) add("Economic evaluation", safe({
+    e <- st$evaluation
+    if (e$type == "CEA" || e$type == "CUA") {
+      inc <- icerIncremental(e$strats)
+      paste0("<p>", esc(e$type), ", willingness-to-pay ", fmtINR(num(e$wtp)), ".</p>", tbl(c("Strategy","Cost","Effect","ICER","Status"), lapply(inc, function(s) c(s$strategy, fmtINR(s$cost), fmtNum(s$effect,2), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
+    } else {
+      paste0("<p>", esc(e$type), " analysis.</p>", tbl(c("Strategy","Cost","Outcome"), lapply(e$strats, function(s) c(s$strategy, fmtINR(num(s$cost)), fmtNum(num(s$effect),2)))))
+    }
+  }))
+
   m <- st$model
-  isQ <- !identical(m$outcome, "DALY")
-  res <- modelRunAll(m)
-  res <- lapply(res, function(s){ s$eff <- if(isQ) s$qaly else s$daly; s })
-  minc <- modelIncremental(res, !isQ)
-  unit <- if(isQ) "QALY" else "DALY averted"
-  modelSec <- paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting, ", if (identical(m$correction, "simpson")) "Simpson's 1/3" else "half-cycle", " within-cycle correction. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>", tbl(c("Strategy","Cost","Life-years","QALYs","DALYs","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$ly,3), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
-  # 5 PSA
-  if (length(m$strategies) >= 2) {
+  if (include("modeling")) {
+    add("Model inputs (study parameters)", safe({
+      f <- fixModel(m)
+      stRows <- lapply(f$states, function(x) c(x$name, fmtINR(num(x$cost)), fmtNum(num(x$util), 3), fmtNum(num(x$dw), 3), if (isAbs(x)) "Yes" else "No"))
+      sgRows <- lapply(f$strategies, function(x) {
+        tr <- if (has_effect(x)) paste0(toupper(if (is.null(x$effect$measure)) "hr" else x$effect$measure), " ", fmtNum(num(x$effect$value), 2),
+                 if (!is.na(num(x$effect$lo, NA))) paste0(" (95% CI ", fmtNum(num(x$effect$lo), 2), "-", fmtNum(num(x$effect$hi), 2), ")") else "",
+                 " on ", length(x$effect$transitions), " transition(s) of '", f$strategies[[num(x$effect$baseline) + 1]]$name, "'") else "Own transition matrix"
+        c(x$name, fmtINR(num(x$addCost)), tr)
+      })
+      paste0(tbl(c("Health state","Cost / cycle","Utility","Disability weight","Absorbing"), stRows),
+             tbl(c("Strategy","Added cost / cycle","Transitions"), sgRows))
+    }))
+    add("Decision-analytic model", safe({
+      isQ <- !identical(m$outcome, "DALY")
+      res <- modelRunAll(m)
+      res <- lapply(res, function(s){ s$eff <- if(isQ) s$qaly else s$daly; s })
+      minc <- modelIncremental(res, !isQ)
+      paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting, ", if (identical(m$correction, "simpson")) "Simpson's 1/3" else "half-cycle", " within-cycle correction. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>",
+             tbl(c("Strategy","Cost","Life-years","QALYs","DALYs","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$ly,3), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))),
+             "<p>Undiscounted totals:</p>",
+             tbl(c("Strategy","Cost","Life-years","QALYs"), lapply(res, function(s) c(s$name, fmtINR(s$undisc$cost), fmtNum(s$undisc$ly,3), fmtNum(s$undisc$qaly,3)))))
+    }))
+  }
+
+  if (include("sensitivity") && length(m$strategies) >= 2) add("Sensitivity analysis", safe({
     pr <- tryCatch(pick_pair(st$sens$ref, st$sens$cmp, length(m$strategies)), error = function(e) c(0L, 1L))
     wtp <- num(st$sens$wtp); cvv <- if(num(st$sens$cv) > 0) num(st$sens$cv) else 0.2
     nIt <- as.integer(min(max(num(st$sens$N, 1000), 1), 2000)); seed <- as.integer(num(st$sens$seed, DEFAULT_SEED))
     draws <- psaModel(m, nIt, pr[1], pr[2], cvv, st$sens[["mode"]], st$sens[["params"]], seed = seed)
     pCE <- mean(vapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0, logical(1)))
     ev <- evpi(draws, wtp)
-    psaSec <- paste0("<p>PSA (", nIt, " iterations, seed ", seed, "). Probability cost-effective at ", fmtINR(wtp), ": <b>", pct(pCE), "</b>. EVPI per patient: <b>", fmtINR(ev), "</b>.</p>")
-  } else psaSec <- "<p>PSA not run (needs at least two strategies).</p>"
-  # 6 BIA
-  br <- biaRun(st$bia)
-  biaSec <- paste0("<p>Budget impact over ", esc(st$bia$horizon), " years. Cumulative net impact: <b>", fmtINR(br[[length(br)]]$cum), "</b>.</p>", tbl(c("Year","Uptake","Net impact","Cumulative"), lapply(br, function(r) c(r$year, pct(r$uptake), fmtINR(r$impact), fmtINR(r$cum)))))
+    tor <- dsaModel(m, wtp, pr[1], pr[2], if (identical(st$sens[["mode"]], "per_parameter")) st$sens[["params"]] else NULL)
+    paste0("<p>Probabilistic sensitivity analysis (", nIt, " iterations, seed ", seed, "). Probability cost-effective at ", fmtINR(wtp), ": <b>", pct(pCE), "</b>. EVPI per patient: <b>", fmtINR(ev), "</b>.</p>",
+           if (length(tor)) paste0("<p>One-way sensitivity analysis (net monetary benefit at ", fmtINR(wtp), "):</p>",
+             tbl(c("Parameter","Range","Source","NMB at low","NMB at high"), lapply(tor, function(t) c(t$label, paste0(fmtNum(t$loVal, 3), " - ", fmtNum(t$hiVal, 3)), t$source, fmtINR(t$nmbAtLo), fmtINR(t$nmbAtHi))))) else "")
+  }))
 
+  if (include("bia")) add("Budget impact", safe({
+    br <- biaRun(st$bia)
+    paste0("<p>Budget impact over ", esc(st$bia$horizon), " years. Cumulative net impact: <b>", fmtINR(br[[length(br)]]$cum), "</b>.</p>", tbl(c("Year","Uptake","Net impact","Cumulative"), lapply(br, function(r) c(r$year, pct(r$uptake), fmtINR(r$impact), fmtINR(r$cum)))))
+  }))
+
+  if (length(st$provenanceList)) add("Where the inputs came from", paste0("<p>Values sent between analyses inside Artha HE.</p>",
+    tbl(c("Input","Came from","Date"), lapply(st$provenanceList, function(x) c(x$target, x$from, x$at)))))
+
+  if (length(st$cheers)) add("CHEERS 2022 reporting checklist", paste0(
+    tbl(c("#","Item","Status","Content / what to add"), lapply(st$cheers, function(x) c(x$n, x$topic, x$status, x$text))),
+    "<p class='meta'>Husereau D, et al. CHEERS 2022 statement. Value Health 2022;25(1):3-9.</p>"))
+
+  if (!length(secs)) add("Nothing to report yet", "<p>Run at least one analysis, then generate the report again.</p>")
+  title <- if (!is.null(pj$title) && nzchar(pj$title)) esc(pj$title) else "Health Economic Analysis Report"
+  body <- paste0(vapply(seq_along(secs), function(i) paste0("<h2>", i, " . ", secs[[i]]$title, "</h2>", secs[[i]]$body), character(1)), collapse = "")
   html <- paste0(
-    "<h1>Artha HE - Health Economic Analysis Report</h1>",
-    "<p class='meta'>Generated ", dt, " . India reference case. Reporting structured to the CHEERS 2022 checklist.</p>",
-    "<h2>1 . Costing</h2>", costSec,
-    "<h2>2 . Out-of-pocket &amp; catastrophic expenditure</h2>", oopSec,
-    "<h2>3 . Economic evaluation</h2>", evalSec,
-    "<h2>4 . Decision-analytic model</h2>", modelSec,
-    "<h2>5 . Sensitivity analysis</h2>", psaSec,
-    "<h2>6 . Budget impact</h2>", biaSec,
+    "<h1>", title, "</h1>",
+    "<p class='meta'>Artha HE report . generated ", dt, " . structured to the CHEERS 2022 checklist.</p>",
+    body,
     "<p class='foot'>Generated by Artha HE . Developed by Dr G Hari Prakash . for research &amp; teaching. Verify inputs before formal use.</p>"
   )
   list(html = html)
