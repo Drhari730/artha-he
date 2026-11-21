@@ -1,57 +1,37 @@
 # validation/validate_darth.R
-# Validates the Artha HE R engine against the DARTH Sick-Sicker model.
-source("../engine.R")
+# Runs the DARTH Sick-Sicker model (time-independent version) through the
+# Artha HE engine and checks it against a separately written reference
+# implementation. Exits with an error if they disagree.
+#
+#   Rscript validation/validate_darth.R        (from the repository root)
+#
+# Parameters: Alarid-Escudero F, Krijkamp EM, Enns EA, et al. "An Introductory
+# Tutorial on Cohort State-Transition Models in R Using a Cost-Effectiveness
+# Analysis Example." Med Decis Making 2023;43(1):3-20.
+#
+# Note: this checks that the engine computes its stated method correctly. It is
+# NOT a reproduction of the published DARTH result tables, which use Simpson's
+# 1/3 within-cycle correction and state-specific treatment costs/utilities.
 
-# DARTH Sick-Sicker Model Parameters
-# States: 1=Healthy, 2=Sick, 3=Sicker, 4=Dead
-# Cycle: 1 year, Horizon: 30 years
-# Discounting: 3% for costs and QALYs
+if (!file.exists("engine.R")) stop("Run this from the repository root.")
+source("engine.R")
+source("tests/testthat/helper-models.R")
 
-darth_model <- list(
-  states = list(
-    list(name = "Healthy", cost = 2000, util = 1.0, absorbing = FALSE),
-    list(name = "Sick", cost = 4000, util = 0.75, absorbing = FALSE),
-    list(name = "Sicker", cost = 15000, util = 0.50, absorbing = FALSE),
-    list(name = "Dead", cost = 0, util = 0.0, absorbing = TRUE)
-  ),
-  strategies = list(
-    list(
-      name = "Standard of Care",
-      addCost = 0,
-      matrix = list(
-        list(0.85, 0.10, 0.00, 0.05),
-        list(0.00, 0.70, 0.20, 0.10),
-        list(0.00, 0.00, 0.80, 0.20),
-        list(0.00, 0.00, 0.00, 1.00)
-      )
-    ),
-    list(
-      name = "Treatment A",
-      addCost = 12000,
-      matrix = list(
-        list(0.85, 0.10, 0.00, 0.05),
-        list(0.00, 0.70, 0.20, 0.10),
-        list(0.00, 0.00, 0.80, 0.20),
-        list(0.00, 0.00, 0.00, 1.00)
-      )
-    )
-  ),
-  cycle = 1,
-  horizon = 30,
-  dCost = 0.03,
-  dEff = 0.03,
-  bgMortality = FALSE
-)
+m <- darth_model()
+res <- modelRunAll(m)
+uvec <- c(darth$u_H, darth$u_S1, darth$u_S2, 0)
+cst <- c(darth$c_H, darth$c_S1, darth$c_S2, 0)
+ref <- list(reference_cstm(darth_matrix(darth), cst, uvec, darth$n_cycles, darth$d),
+            reference_cstm(darth_matrix(darth, TRUE), cst + c(rep(darth$c_trtB, 3), 0), uvec, darth$n_cycles, darth$d))
 
-# Run Artha HE Engine
-res <- modelRunAll(darth_model)
-
-cat("DARTH Sick-Sicker Validation\n")
-cat("----------------------------\n")
-cat("Standard of Care Cost:", res[[1]]$cost, "\n")
-cat("Standard of Care QALYs:", res[[1]]$qaly, "\n")
-cat("Treatment A Cost:", res[[2]]$cost, "\n")
-cat("Treatment A QALYs:", res[[2]]$qaly, "\n")
-
+cat("DARTH Sick-Sicker (time-independent), 75 annual cycles, 3% discounting\n")
+cat(sprintf("%-18s %14s %14s %10s %10s\n", "Strategy", "Cost (engine)", "Cost (ref)", "QALY (eng)", "QALY (ref)"))
+ok <- TRUE
+for (i in 1:2) {
+  cat(sprintf("%-18s %14.2f %14.2f %10.4f %10.4f\n", res[[i]]$name, res[[i]]$cost, ref[[i]]$cost, res[[i]]$qaly, ref[[i]]$qaly))
+  ok <- ok && abs(res[[i]]$cost - ref[[i]]$cost) < 1e-6 * ref[[i]]$cost && abs(res[[i]]$qaly - ref[[i]]$qaly) < 1e-9
+}
 icer <- (res[[2]]$cost - res[[1]]$cost) / (res[[2]]$qaly - res[[1]]$qaly)
-cat("ICER:", icer, "\n")
+cat(sprintf("ICER (Strategy B vs SoC): %.0f per QALY\n", icer))
+if (!ok) stop("Engine and reference implementation disagree.")
+cat("PASS: engine matches the reference implementation.\n")

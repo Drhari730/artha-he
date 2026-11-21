@@ -27,42 +27,64 @@ and per-analysis export to **Excel (.xlsx) / Word / PDF / PNG**.
 
 ## How it's built
 
-Pure client-side **HTML + CSS + JavaScript** (no framework). All calculations use
-standard published health-economics formulae — the same methods implemented in the
-R toolchain (`hesim`, `heemod`, `dampack`, `BCEA`): discounting, half-cycle correction,
-ICER/dominance, PSA, CEAC, EVPI. Reporting is structured to the **CHEERS 2022** checklist.
+- **Front end:** plain HTML + CSS + JavaScript in `public/` (no framework). It handles input, charts and export.
+- **Engine:** every calculation runs in R (`engine.R`), served as a JSON API by [plumber](https://www.rplumber.io/) (`plumber.R`). The front end calls `/api/*`, so **the app needs the R server running**; opening `index.html` directly will not work.
+- **Methods:** standard published formulae (discounting, half-cycle correction, ICER with strong and iterated extended dominance, net monetary benefit, Gamma/Beta/Dirichlet PSA, CEAC, EVPI). Reporting is structured to **CHEERS 2022**.
 
 ## Run it locally
 
-**Easiest:** just open `index.html` in any browser (works offline).
+You need R (4.3 or later) with `plumber`, `jsonlite` and `testthat`:
 
-**Or via the bundled server:**
 ```bash
-npm start        # serves on http://localhost:8088 (or $PORT)
+Rscript -e "install.packages(c('plumber','jsonlite','testthat'))"
 ```
+
+```bash
+Rscript run.R
+```
+
+Then open http://localhost:8080 (set `PORT` to change the port).
+
+## Tests and validation
+
+```bash
+Rscript tests/run_tests.R
+```
+
+```bash
+Rscript validation/validate_darth.R
+```
+
+The `testthat` suite covers the Markov engine (closed-form checks, DARTH Sick-Sicker parameters against a separately written reference implementation, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
 
 ## Deploy (Railway)
 
-This repo is deploy-ready. On [Railway](https://railway.app):
+The repo deploys with the `Dockerfile` (pinned `rocker/r-ver:4.4.1`):
 1. **New Project → Deploy from GitHub repo** → pick this repo.
-2. Railway auto-detects Node, runs `npm start` (`node server.js`), and serves on `$PORT`.
+2. Railway builds the Dockerfile (`railway.json`) and starts `Rscript run.R` on `$PORT`.
 3. Add a public domain under **Settings → Networking → Generate Domain**.
-
-`server.js` is a zero-dependency static file server; `railway.json` / `Procfile`
-pin the start command.
 
 ## Project layout
 
 ```
-ArthaHE/
-  index.html        # shell, design system, landing + app screens
-  app.js            # engines (costing, ICER, Markov, PSA, BIA…) + UI + export
-  server.js         # zero-dependency static server for hosting
-  package.json      # start script (node server.js)
-  railway.json      # Railway deploy config
-  Procfile          # start command
-  legacy-shiny/     # earlier R/Shiny prototype (not used by the web app)
+engine.R            # calculation engine (pure R)
+plumber.R           # JSON API + report builder
+run.R               # starts the server (error handling, request-size limit)
+public/             # front end: index.html, app.js
+tests/              # testthat suite (tests/run_tests.R)
+validation/         # DARTH validation script + VALIDATION.md
+Dockerfile          # pinned R image; runs the tests at build time
+legacy-shiny/       # earlier R/Shiny prototype (not used by the web app)
 ```
+
+## Key conventions
+
+- The Markov cohort starts in the first state. Occupancy uses the trapezoidal (half-cycle) rule, and cycle *t* is discounted at (1+r)^((t−1)·cycle).
+- Transition-matrix rows must sum to 1. Rows within 0.001 of 1 are renormalised; anything further off is rejected with a message.
+- A strategy's "added cost" applies to every non-absorbing state.
+- The optimal strategy is the one with the highest net monetary benefit at the willingness-to-pay threshold.
+- Catastrophic health expenditure counts **direct medical** payments only (SDG 3.8.2 / WHO). Transport and lost income are reported, but excluded from the ratios.
+- PSA uses a fixed random seed by default, so results are reproducible. You can change the seed in the Sensitivity tab.
 
 ---
 *For research & teaching. Verify all inputs against your study protocol before use.*

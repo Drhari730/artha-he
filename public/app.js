@@ -2,8 +2,8 @@
    Artha HE — Health Economics Workbench  (v1.1)
    Landing page · costing · OOP · evaluation types (CMA/CEA/CUA/CBA/CCA) ·
    Markov modeling · PSA/DSA · budget impact · templates · multi-format export.
-   UI only — all calculations run on the private server engine via /api/*.
-   Standard published HE methods, cross-validated against an independent impl.
+   UI only — all calculations run on the R engine (engine.R) via /api/*.
+   Standard published HE methods, covered by tests/testthat.
    ============================================================================= */
 
 const RUPEE="₹", GDP_PC=200000;
@@ -17,18 +17,22 @@ const fmtNum=(x,dp=2)=>Number(x).toLocaleString("en-IN",{minimumFractionDigits:d
 const pct=(x,dp=1)=>(x*100).toFixed(dp)+"%";
 const compactINR=x=>{const a=Math.abs(x);if(a>=1e7)return RUPEE+(x/1e7).toFixed(2)+" Cr";if(a>=1e5)return RUPEE+(x/1e5).toFixed(2)+" L";return fmtINR(x);};
 
+/* ---------- safety: strip HTML from text that arrives from files or storage ---------- */
+const escHTML=t=>String(t==null?"":t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function scrub(o){if(typeof o==="string")return o.replace(/[<>]/g,"");if(Array.isArray(o))return o.map(scrub);if(o&&typeof o==="object"){const r={};for(const k in o)r[k]=scrub(o[k]);return r;}return o;}
+
 /* ---------- math ---------- */
 const sum=a=>a.reduce((s,x)=>s+x,0), seq=n=>Array.from({length:n},(_,i)=>i);
 const nmb=(c,e,w)=>e*w-c; // net benefit — only used to colour the PSA scatter client-side
 
-/* ---------- API: every calculation runs on the private server engine ---------- */
+/* ---------- API: every calculation runs on the R engine (engine.R) ---------- */
 async function api(name,payload){
   const r=await fetch("/api/"+name,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload||{})});
-  if(!r.ok){let m="";try{m=(await r.json()).detail||"";}catch(e){}throw new Error(m||"Calculation failed.");}
+  if(!r.ok){let m="";try{const j=await r.json();m=j.error||j.detail||"";}catch(e){}throw new Error(m||"Calculation failed.");}
   return r.json();
 }
 function wsBusy(msg){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>${msg||"Computing…"}</h2><div class="sub">Running on the server…</div></div></div>`;}
-function wsError(e){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>Couldn't compute</h2><div class="sub">${(e&&e.message)||e}. Check your inputs and try again.</div></div></div>`;}
+function wsError(e){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>Couldn't compute</h2><div class="sub">${escHTML((e&&e.message)||e)} Check your inputs and try again.</div></div></div>`;}
 function interpCard(arr){if(!arr||!arr.length)return"";return `<div class="card interp"><h3>How to read this result</h3><ol class="interp-list">${arr.map(t=>`<li>${t}</li>`).join("")}</ol></div>`;}
 function emptyState(title,msg){document.getElementById("workspace").innerHTML=`<div class="ws-head"><div><h2>${title}</h2></div></div><div class="card" style="text-align:center;padding:48px 24px"><div style="font-size:40px;opacity:.25;margin-bottom:14px">▦</div><h3 style="font-family:var(--display);font-size:19px;margin-bottom:10px">Enter your data to begin</h3><p style="color:var(--muted);max-width:480px;margin:0 auto;line-height:1.65">${msg}</p></div>`;}
 function addInterp(R){const ws=document.getElementById("workspace");if(R&&R.interpretation)ws.insertAdjacentHTML("beforeend",interpCard(R.interpretation));}
@@ -55,7 +59,7 @@ function fixModel(m){ // ensure each strategy matrix is n×n
 function rowSum(row){return sum(row.map(Number));}
 
 /* ---------- CSV + templates + export ---------- */
-function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(",").map(s=>s.trim());return L.slice(1).map(ln=>{const c=ln.split(",");const o={};h.forEach((k,i)=>o[k]=(c[i]||"").trim());return o;});}
+function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(",").map(s=>s.trim());return scrub(L.slice(1).map(ln=>{const c=ln.split(",");const o={};h.forEach((k,i)=>o[k]=(c[i]||"").trim());return o;}));}
 function toCSV(rows,cols){return cols.join(",")+"\n"+rows.map(r=>cols.map(c=>r[c]).join(",")).join("\n");}
 function dl(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();}
 function download(name,text){dl(new Blob([text],{type:"text/csv"}),name);}
@@ -121,10 +125,11 @@ function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}
 function barChartH(data){const W=660,rh=50,H=data.length*rh+28,padL=185,padR=120,max=Math.max(...data.map(d=>d.value),1),bw=W-padL-padR;let g="";
   data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"><title>${d.label}: ${d.tag}</title></rect>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
   return svgWrap(W,H,g);}
-function barChartV(data,fmt){const W=660,H=380,ox=70,oy=H-50,pw=W-ox-30,ph=oy-24,max=Math.max(...data.map(d=>Math.abs(d.value)),1)*1.1;let g="";
-  for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`;g+=txt(ox-8,yy+4,fmt(max*i/4),{anchor:"end",fill:C.muted,size:10,mono:true});}
-  g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  data.forEach((d,i)=>{const bw=pw/data.length*.5,x=ox+(i+.5)*pw/data.length-bw/2,bh=(d.value/max)*ph;g+=`<rect x="${x}" y="${oy-bh}" width="${bw}" height="${bh}" rx="6" fill="${d.color||SERIES[i%6]}"><title>${d.label}: ${fmt(d.value)}</title></rect>`;g+=txt(ox+(i+.5)*pw/data.length,oy+18,d.label,{anchor:"middle",fill:C.muted,size:11});});
+function barChartV(data,fmt){const W=660,H=380,ox=70,oy=H-50,pw=W-ox-30,ph=oy-24,max=Math.max(...data.map(d=>Math.abs(d.value)),1)*1.1,neg=data.some(d=>d.value<0),y0=neg?oy-ph/2:oy,span=neg?ph/2:ph;let g="";
+  // Savings (negative values) are drawn below a zero line in the middle of the chart.
+  for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph,v=neg?max*(i/2-1):max*i/4;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`;g+=txt(ox-8,yy+4,fmt(v),{anchor:"end",fill:C.muted,size:10,mono:true});}
+  g+=`<line x1="${ox}" y1="${y0}" x2="${ox+pw}" y2="${y0}" stroke="${C.ink}" stroke-width="1.2"/>`;
+  data.forEach((d,i)=>{const bw=pw/data.length*.5,x=ox+(i+.5)*pw/data.length-bw/2,bh=Math.abs(d.value)/max*span,y=d.value>=0?y0-bh:y0;g+=`<rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="6" fill="${d.color||(d.value<0?C.emerald:SERIES[i%6])}"><title>${escHTML(d.label)}: ${fmt(d.value)}</title></rect>`;g+=txt(ox+(i+.5)*pw/data.length,oy+18,d.label,{anchor:"middle",fill:C.muted,size:11});});
   return svgWrap(W,H,g);}
 function cePlane(points,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...points.map(p=>Math.abs(p.dEff)))*1.3,yMax=Math.max(1,...points.map(p=>Math.abs(p.dCost)))*1.3,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
   g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
@@ -172,7 +177,7 @@ const state={
       {name:"Comparator",addCost:0,matrix:[[1,0,0],[0,1,0],[0,0,1]]},
       {name:"Intervention",addCost:0,matrix:[[1,0,0],[0,1,0],[0,0,1]]}],
     cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1,startAge:30,bgMortality:false},
-  sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2},
+  sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2,seed:20251121},
   bia:{population:0,eligible:0,maxUptake:0,horizon:5,startYear:2025,costNew:0,costOld:0},
   vb:{tool:"qaly",
     qaly:{discount:0.03,rows:[]},
@@ -509,8 +514,8 @@ function renderOopSidebar(){
     ${exRow("oop")}
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Item</th><th>Category</th><th>₹ Amount</th><th></th></tr></thead><tbody id="oopRows">${rows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addOop">+ Add item</button><button class="btn btn-ghost sm" id="clearOop">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="oopFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplOop">Template</button></div>
-    <div class="field"><label>Annual household income (₹)</label><input type="number" id="income" value="${o.income}"></div>
-    <div class="field"><label>Annual non-food / capacity-to-pay (₹)</label><input type="number" id="nonFood" value="${o.nonFood}"></div>
+    <div class="field"><label>Annual household consumption expenditure (or income) (₹)</label><input type="number" id="income" value="${o.income}"></div>
+    <div class="field"><label>Annual capacity-to-pay — non-food / non-subsistence spending (₹)</label><input type="number" id="nonFood" value="${o.nonFood}"></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="calcOop">Calculate</button>`;
   document.querySelectorAll("#oopRows [data-f]").forEach(el=>el.onchange=()=>o.items[+el.dataset.i][el.dataset.f]=el.dataset.f==="amount"?+el.value:el.value);
   document.querySelectorAll("#oopRows .row-del").forEach(el=>el.onclick=()=>{o.items.splice(+el.dataset.del,1);renderOopSidebar();});
@@ -531,16 +536,16 @@ async function renderOop(){
   const bars=r.byCat.map((b,i)=>({label:b.category,value:b.cost,tag:compactINR(b.cost)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
   const flag=(v,t)=>`<span class="tag ${v?"dominated":"frontier"}">${v?"Yes":"No"}</span> ${t}`;
   const it=r.items.map(i=>`<tr><td>${i.item}</td><td style="text-align:left;font-family:var(--sans);font-size:11px;color:var(--muted)">${i.category}</td><td>${fmtINR(i.amount)}</td></tr>`).join("");
-  ws.innerHTML=`<div class="ws-head"><div><h2>Out-of-pocket expenditure</h2><div class="sub">Direct patient payments and catastrophic-health-expenditure (CHE) check at 10% of income and 40% of capacity-to-pay.</div></div>${EXPORT_BAR}</div>
+  ws.innerHTML=`<div class="ws-head"><div><h2>Out-of-pocket expenditure</h2><div class="sub">Direct patient payments, and a catastrophic-health-expenditure (CHE) check on <b>direct medical</b> payments at 10% / 25% of household consumption (SDG 3.8.2) and 40% of capacity-to-pay (WHO).</div></div>${EXPORT_BAR}</div>
     <div class="kpis">
       <div class="kpi accent"><div class="k-label">Total OOP</div><div class="k-val">${compactINR(r.total)}</div><div class="k-sub">${fmtINR(r.total)}</div></div>
-      <div class="kpi gold"><div class="k-label">% of income</div><div class="k-val mono">${pct(r.pctInc)}</div><div class="k-sub">of ${compactINR(o.income)}/yr</div></div>
-      <div class="kpi ${r.che10?'':'emerald'}"><div class="k-label">Catastrophic (10% income)</div><div class="k-val sm" style="color:${r.che10?C.red:C.emerald}">${r.che10?"Yes":"No"}</div><div class="k-sub">${pct(r.pctInc)} vs 10%</div></div>
+      <div class="kpi gold"><div class="k-label">Health payments</div><div class="k-val mono">${pct(r.pctInc)}</div><div class="k-sub">${compactINR(r.health)} direct medical, of ${compactINR(o.income)}/yr</div></div>
+      <div class="kpi ${r.che10?'':'emerald'}"><div class="k-label">Catastrophic (10%)</div><div class="k-val sm" style="color:${r.che10?C.red:C.emerald}">${r.che10?"Yes":"No"}</div><div class="k-sub">${pct(r.pctInc)} vs 10%</div></div>
       <div class="kpi ${r.che40?'':'emerald'}"><div class="k-label">Catastrophic (40% CTP)</div><div class="k-val sm" style="color:${r.che40?C.red:C.emerald}">${r.che40?"Yes":"No"}</div><div class="k-sub">${pct(r.pctCTP)} vs 40%</div></div></div>
     <div class="result-tabs" id="oopTabs"><button class="result-tab active" data-p="cat">By category</button><button class="result-tab" data-p="items">Items</button></div>
     <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>OOP by category</h3><div class="card-sub">Direct medical, direct non-medical and indirect (productivity) burden.</div>${barChartH(bars)}</div></div></div>
     <div class="pane" data-pane="items"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Amount</th></tr></thead><tbody>${it}</tbody><tfoot><tr><td>Total OOP</td><td></td><td>${fmtINR(r.total)}</td></tr></tfoot></table></div>
-      <p class="note">CHE definitions: OOP &gt; 10% (or 25%) of household income, or &gt; 40% of capacity-to-pay (non-food expenditure) — WHO/standard thresholds.</p></div></div>`;
+      <p class="note">CHE definitions: out-of-pocket payments for health goods and services (the <b>Direct medical</b> category) &gt; 10% (or 25%: ${r.che25?"yes":"no"}) of household consumption expenditure (SDG 3.8.2), or &gt; 40% of capacity-to-pay (WHO). Transport, food and lost income (${fmtINR(r.nonHealth)}) are part of the economic burden but are excluded from the CHE ratios.</p></div></div>`;
   wireTabs("oopTabs");wireExports("Artha Out-of-Pocket");
 }
 
@@ -695,14 +700,14 @@ async function renderModel(){
   let R;try{R=await api("model",m);}catch(e){return wsError(e);}
   const inc=R.rows,best=R.best,unit=R.unit,lowerBetter=m.outcome==="DALY";
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
-  const incRows=inc.map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
+  const incRows=inc.map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.ly,3)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
   const pts=R.plane,series=R.series;
   ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, half-cycle correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.${m.bgMortality?` <b>Age-specific background mortality on</b> (from age ${m.startAge}).`:""}</div></div>${EXPORT_BAR}</div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">Optimal at WTP</div><div class="k-val sm">${best.name}</div><div class="k-sub">at ${compactINR(m.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">Its ICER</div><div class="k-val mono">${best.icer==null?"ref":fmtINR(best.icer)}</div><div class="k-sub">per ${unit}</div></div><div class="kpi emerald"><div class="k-label">Strategies</div><div class="k-val mono">${m.strategies.length}</div><div class="k-sub">${R.onFr} on frontier</div></div></div>
     <div class="result-tabs" id="mTabs"><button class="result-tab active" data-p="trace">Cohort trace</button><button class="result-tab" data-p="ce">CE plane</button><button class="result-tab" data-p="inc">Incremental</button></div>
     <div class="pane active" data-pane="trace"><div class="card flush"><div class="pad"><h3>Cohort trace — ${R.activeName}</h3><div class="card-sub">Share of the cohort in each state over time (switch strategy in the sidebar).</div>${lineChart(series,"Years",m.horizon)}</div><div class="legend">${m.states.map((s,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${s.name}</div>`).join("")}</div></div></div>
     <div class="pane" data-pane="ce"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each strategy vs the cheapest. ${lowerBetter?"X = DALYs averted (right is better).":"X = incremental QALYs."}</div>${cePlane(pts,m.wtp)}</div></div></div>
-    <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>QALYs</th><th>DALYs</th><th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div><p class="note">ICER in ₹ per ${unit}. India thresholds: 1×GDP ≈ ${fmtINR(GDP_PC)}, 3×GDP ≈ ${fmtINR(GDP_PC*3)}.</p></div></div>`;
+    <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Life-years</th><th>QALYs</th><th>DALYs</th><th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div><p class="note">ICER in ₹ per ${unit}. India thresholds: 1×GDP ≈ ${fmtINR(GDP_PC)}, 3×GDP ≈ ${fmtINR(GDP_PC*3)}.</p></div></div>`;
   wireTabs("mTabs");wireExports("Artha Markov Model");addInterp(R);
 }
 
@@ -756,6 +761,7 @@ function renderSensSidebar(){
     <div class="field two"><div><label>Reference</label><select id="sRef">${opts}</select></div><div><label>Compared</label><select id="sCmp">${opts}</select></div></div>
     <div class="field"><label>Distribution mode</label><select id="sMode"><option value="global" ${s.mode==="global"?"selected":""}>Global CV (Simple)</option><option value="per_parameter" ${s.mode==="per_parameter"?"selected":""}>Per-Parameter (Advanced)</option></select></div>
     ${s.mode === "global" ? `<div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>` : gridHtml}
+    <div class="field"><label>Random seed (same seed = same results)</label><input type="number" id="psaSeed" value="${s.seed==null?20251121:s.seed}"></div>
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
     <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="1000000" step="25000" value="${s.wtp}"></div>
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
@@ -766,6 +772,7 @@ function renderSensSidebar(){
   document.getElementById("sCmp").onchange=e=>s.cmp=+e.target.value;
   document.getElementById("sMode").onchange=e=>{s.mode=e.target.value;renderSensSidebar();};
   
+  document.getElementById("psaSeed").onchange=e=>{s.seed=Math.round(+e.target.value)||20251121;};
   const n=document.getElementById("psaN");n.oninput=()=>{s.N=+n.value;document.getElementById("nLab").textContent=s.N;};
   const w=document.getElementById("swtp");w.oninput=()=>{s.wtp=+w.value;document.getElementById("swtpLab").textContent=compactINR(+w.value);};
   
@@ -786,11 +793,11 @@ async function renderSens(){
   const s=state.sens,m=state.model,ws=document.getElementById("workspace");
   if(!(m.states.some(x=>+x.util>0||+x.cost>0)||m.strategies.some(x=>+x.addCost>0)))return emptyState("Sensitivity analysis","This runs on the Markov model. First set up the model in the Modeling tab (or load an example there), then come back and Run analysis.");
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
-  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params});}catch(e){return wsError(e);}
+  let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed});}catch(e){return wsError(e);}
   const unit=R.unit;
-  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions.`;
+  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept).`;
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
-      <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div></div></div>
+      <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div><div class="k-sub">seed ${R.seed}</div></div></div>
       <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
       <div class="pane" data-pane="scatter"><div class="card flush"><div class="pad"><h3>PSA on the CE plane</h3><div class="card-sub">Each point = one Monte-Carlo draw. Purple = cost-effective at current WTP.</div>${scatterPSA(R.draws,R.wtp)}</div></div></div>
@@ -835,9 +842,9 @@ async function renderBia(){
 /* ============================ PERSISTENCE ============================ */
 function saveLocal(){try{localStorage.setItem("arthaHE_v2",JSON.stringify(state));}catch(e){}}
 function deepMerge(target,src){if(src===null||src===undefined)return target;if(Array.isArray(target))return Array.isArray(src)?src:target;if(typeof target==="object"){if(typeof src!=="object"||Array.isArray(src))return target;for(const k in src){if(k in target&&target[k]&&typeof target[k]==="object"&&!Array.isArray(target[k])){deepMerge(target[k],src[k]);}else{target[k]=src[k];}}return target;}return src===undefined?target:src;}
-function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=JSON.parse(s);Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
+function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=scrub(JSON.parse(s));Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
 function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
-function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=JSON.parse(rd.result);Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
+function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=scrub(JSON.parse(rd.result));Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
 
 /* ============================ GLOSSARY ============================ */
 const GLOSSARY={
@@ -869,15 +876,15 @@ async function renderMethods(){
   const vals=V.rows,allok=V.allok;
   const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
   const limitations=[
-    ["Costing is simplified","Costs are quantity × unit cost. It does not yet do staff-time salary apportioning, capital annualisation (equivalent annual cost), overhead/space allocation, or PPP conversion — needed for a full micro-costing study."],
+    ["Costing","Advanced costing covers salary apportioning, capital annualisation and space. Inflation uses a single constant rate (not a CPI series), and there is no PPP / currency conversion yet."],
     ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles (though optional age-specific background mortality and a rate→probability / cycle-length helper are now provided). Tunnel states and fully time-varying disease transitions are not yet supported — use care for long horizons."],
-    ["PSA uncertainty is assumed, not from data","Distributions (Gamma / Beta / Dirichlet) are applied at a single coefficient of variation you choose. For a real study, each distribution should be set from the actual data and correlations considered."],
+    ["PSA uncertainty","In Global mode, distributions (Gamma / Beta / Dirichlet) use one coefficient of variation you choose; use Per-Parameter mode to set them from your data. Each strategy's transition rows are sampled with common random numbers, which keeps the arms correlated. They are not yet derived from a sampled treatment effect (RR / HR) applied to a baseline matrix."],
     ["DALYs are approximate","YLL uses one life-expectancy value rather than the GBD reference life table; age-weighting/discounting choices are not exposed."],
     ["Reference data is indicative","Unit costs, disability weights and life tables are starting values — confirm each from its cited official source before formal use."]
   ];
   const methodsUsed=[
-    "Discounting: present value = future value ÷ (1+r)^t.",
-    "ICER = (C₁−C₀)/(E₁−E₀), with strong and extended dominance.",
+    "Discounting: present value = future value ÷ (1+r)^t; Markov cycle t is discounted at (1+r)^(t−1)·cycle.",
+    "ICER = (C₁−C₀)/(E₁−E₀) against the previous non-dominated option, after removing strongly and (iteratively) extendedly dominated options. The optimal option is the one with the highest net monetary benefit at the threshold.",
     "Net monetary benefit = effect × WTP − cost.",
     "Markov cohort: state occupancy via the transition matrix, with half-cycle correction and discounting of costs and effects.",
     "DALYs = years lived with disability (occupancy × disability weight) + years of life lost (deaths × life expectancy).",
@@ -887,16 +894,9 @@ async function renderMethods(){
     <div class="ws-head"><div><h2>Methods, validation &amp; limitations</h2><div class="sub">Full transparency on what Artha HE computes, how it was checked, and — importantly — what it does <b>not</b> yet do. This tool is intended for teaching and for scoping/first-pass analysis; verify everything before any formal study or submission.</div></div></div>
 
     <div class="card" style="border-left:4px solid var(--emerald)">
-      <h3>Cross-validation <span class="tag frontier">independent implementation · exact match</span></h3>
-      <div class="card-sub">The engine's core outputs were reproduced by a completely separate implementation written from the method definitions (Python). All quantities agreed to within floating-point precision (relative difference 0.00). This confirms the engine computes what it intends to — it does <b>not</b> validate that the inputs or assumptions are appropriate for your question.</div>
-      <div class="table-scroll"><table class="results-table"><thead><tr><th>Quantity (default Markov + CEA + costing)</th><th>Engine</th><th>Independent</th><th>Δ</th></tr></thead><tbody>
-        <tr><td>Standard-care cost</td><td>₹94,621.02</td><td>₹94,621.02</td><td>0.00</td></tr>
-        <tr><td>Standard-care QALYs</td><td>8.3279</td><td>8.3279</td><td>0.00</td></tr>
-        <tr><td>New-treatment cost</td><td>₹1,98,216.49</td><td>₹1,98,216.49</td><td>0.00</td></tr>
-        <tr><td>New-treatment QALYs</td><td>9.7186</td><td>9.7186</td><td>0.00</td></tr>
-        <tr><td>Markov ICER (₹/QALY)</td><td>74,489.0</td><td>74,489.0</td><td>0.00</td></tr>
-        <tr><td>CEA ICER, B vs A</td><td>50,000.0</td><td>50,000.0</td><td>0.00</td></tr>
-      </tbody></table></div></div>
+      <h3>How the engine is validated</h3>
+      <div class="card-sub">The R engine (<code>engine.R</code>) is open source and covered by an automated test suite (<code>tests/testthat</code>, run on every push). The suite checks: Markov results against closed-form answers; the DARTH Sick-Sicker model parameters (Alarid-Escudero et al., <i>Med Decis Making</i> 2023) against a separately written reference implementation; strong and extended dominance on worked examples; PSA reproducibility, absorbing states and correlated sampling; and the costing, out-of-pocket and budget-impact formulae. This confirms that the engine computes what it intends to. It does <b>not</b> confirm that your inputs or model structure suit your question.</div>
+      <p class="note">The engine does not yet reproduce the published DARTH result tables exactly. Those use Simpson's 1/3 within-cycle correction and treatment costs and utilities that apply to specific states only, which Artha HE does not support yet. Artha uses the trapezoidal (half-cycle) rule, and a strategy's added cost applies to every non-absorbing state.</p></div>
 
     <div class="card" style="border-left:3px solid ${allok?'var(--emerald)':'var(--red)'}">
       <h3>Engine self-checks ${allok?'<span class="tag frontier">all passed</span>':'<span class="tag dominated">check failed</span>'}</h3>
@@ -911,9 +911,9 @@ async function renderMethods(){
     </div>
 
     <div class="card"><h3>Methods used (standard, published)</h3>
-      <div class="card-sub">The engine implements standard health-economics methods; the implementation code is kept private but the methods are not secret:</div>
+      <div class="card-sub">The engine implements standard, published health-economics methods; the R code is in the repository for inspection:</div>
       <ul class="checklist">${methodsUsed.map(m=>`<li><span class="ok">→</span><span>${m}</span></li>`).join("")}</ul>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${["CHEERS 2022","Half-cycle correction","PSA · CEAC · EVPI","India reference case","Cross-validated"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">${["CHEERS 2022","Half-cycle correction","PSA · CEAC · EVPI","India reference case","Automated tests"].map(b=>`<span class="pill">${b}</span>`).join("")}</div></div>
 
     <h2 class="sec">Glossary</h2>
     <p class="secsub">Plain-language definitions — hover the dotted terms anywhere in the app to see these.</p>

@@ -1,21 +1,23 @@
-FROM rocker/r-base:latest
+# Pinned R version so builds are reproducible.
+FROM rocker/r-ver:4.4.1
 
-# Install necessary system dependencies for other packages
-RUN apt-get update -qq && apt-get install -y \
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
   libssl-dev \
   libcurl4-gnutls-dev \
   libsodium-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# Create application directory
 WORKDIR /app
 
-# Install R packages required by our engine and API
-RUN R -e "install.packages(c('plumber', 'jsonlite', 'dplyr'), repos='https://cloud.r-project.org/')"
+# rocker/r-ver installs packages from a dated CRAN snapshot (Posit Package Manager),
+# so these versions are fixed by the image tag above.
+RUN R -e "install.packages(c('plumber', 'jsonlite', 'testthat'))"
 
-# Copy application files
 COPY engine.R plumber.R run.R /app/
+COPY tests /app/tests
 COPY public /app/public
 
-# Run the Plumber application
+# Fail the build if the engine tests fail.
+RUN Rscript tests/run_tests.R
+
 CMD ["Rscript", "run.R"]
