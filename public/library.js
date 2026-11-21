@@ -167,7 +167,7 @@ function renderScenarioSidebar(){
   return `<div class="sublabel">Scenario analysis</div>
     <p class="hint">Alternative assumptions run side by side with the base case (your current model). Change the model, save it as a scenario, then switch back, or let Artha generate the standard ones.</p>
     <label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12.5px;margin:6px 0"><input type="checkbox" id="scStd" ${S.includeStandard?"checked":""} style="width:auto">Include standard scenarios${k==="tree"?" (none for decision trees)":" (discounting 0% / 5%, outcomes undiscounted, horizon halved, other within-cycle correction"+(k==="markov"?", background mortality":"")+")"}</label>
-    <div class="field two"><div><label>Save the current model as</label><input type="text" id="scName" placeholder="e.g. Price cut 20%"></div><div style="display:flex;align-items:flex-end"><button class="btn btn-secondary sm" id="scSave" style="width:100%">Save scenario</button></div></div>
+    <div class="field"><label>Save the current model as a scenario</label><div class="inline-row"><input type="text" id="scName" placeholder="e.g. Price cut 20%"><button class="btn btn-secondary" id="scSave">Save</button></div></div>
     ${k==="psm"&&fits.length?`<button class="btn btn-ghost sm" id="scCurves">+ A scenario for each alternative fitted curve</button>`:""}
     ${items?`<div class="grid-wrap" style="margin-top:8px"><table class="data-grid"><tbody>${items}</tbody></table></div>`:'<p class="hint">No saved scenarios yet.</p>'}
     <div class="divider"></div><button class="btn btn-primary btn-block" id="scRun">Run scenarios</button>`;

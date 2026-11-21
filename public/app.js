@@ -704,8 +704,8 @@ function renderModelSidebar(){
     ${modelTypeSeg()}
     <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
     ${exRow("model")}
-    <div class="sublabel">Health states (cost · utility · disability weight · dead?)</div>
-    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost</th><th>Utility</th><th>Disability wt</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
+    <div class="sublabel">Health states (annual cost · utility · disability weight · dead?)</div>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Cost / year</th><th>Utility</th><th>Disability wt</th><th>Dead</th><th></th></tr></thead><tbody id="stRows">${stRows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
     <div class="sublabel">Strategies &amp; transition matrix</div>
     <div class="seg types" id="stratSel">${strBtns}</div>
@@ -1250,7 +1250,7 @@ const REFDATA={
 function wireTabs(id){const host=document.getElementById(id);host.querySelectorAll(".result-tab").forEach(tab=>tab.onclick=()=>{host.querySelectorAll(".result-tab").forEach(t=>t.classList.remove("active"));tab.classList.add("active");document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("active",p.dataset.pane===tab.dataset.p));});}
 function route(mod){
   state.module=mod;
-  document.querySelectorAll("#topnav button").forEach(b=>b.classList.toggle("active",b.dataset.mod===mod));
+  syncNav();
   const layout=document.getElementById("layout");
   if(mod==="methods"||mod==="reference"){layout.classList.add("full");(mod==="methods"?renderMethods:renderReference)();window.scrollTo(0,0);saveLocal();return;}
   layout.classList.remove("full");
@@ -1266,6 +1266,15 @@ function route(mod){
   saveLocal();
 }
 document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));
+// Active tab + a green dot on each step that has been run; keep the active tab visible in the strip.
+function syncNav(){
+  const runs=state.runs||{},key={modeling:"modeling",sensitivity:"sensitivity",costing:"costing",vb:"vb",survival:"survival",evaluation:"evaluation",oop:"oop",bia:"bia"};
+  document.querySelectorAll("#topnav button").forEach(b=>{const m=b.dataset.mod;b.classList.toggle("active",m===state.module);b.classList.toggle("done",!!(key[m]&&runs[key[m]]));
+    if(m===state.module){const nav=b.parentElement,l=b.offsetLeft,r=l+b.offsetWidth;if(l<nav.scrollLeft+12||r>nav.scrollLeft+nav.clientWidth-24)nav.scrollLeft=l-nav.clientWidth/2+b.offsetWidth/2;}});
+}
+// On small screens the results sit below the form: jump to them after pressing the run button.
+document.getElementById("sidebar").addEventListener("click",e=>{const b=e.target.closest(".divider + .btn-primary.btn-block");if(!b||window.innerWidth>980)return;
+  setTimeout(()=>document.getElementById("workspace").scrollIntoView({behavior:"smooth",block:"start"}),350);});
 document.getElementById("brandHome").onclick=backToLanding;
 document.getElementById("saveProj").onclick=exportProject;
 document.getElementById("loadProj").onchange=e=>{if(e.target.files[0])importProject(e.target.files[0]);};
@@ -1281,5 +1290,17 @@ setInterval(saveLocal,5000);
   bar.addEventListener("dblclick",()=>{document.documentElement.style.removeProperty("--sbw");try{localStorage.removeItem("arthaSBW");}catch(e){}});
   try{const w=localStorage.getItem("arthaSBW");if(w)document.documentElement.style.setProperty("--sbw",w);}catch(e){}
 })();
+// A clean copy of the defaults, taken before any saved session is loaded.
+const STATE_DEFAULTS=JSON.parse(JSON.stringify(state));
+function newProject(){
+  if(!confirm("Start a new project?\n\nEverything in the current project will be cleared. Your Reference library and GDP threshold are kept.\n\nSave the current project first if you need it."))return;
+  const keepLib=state.refLib,keepGdp=state.settings&&state.settings.gdp;
+  Object.keys(state).forEach(k=>delete state[k]);
+  Object.assign(state,JSON.parse(JSON.stringify(STATE_DEFAULTS)));
+  state.refLib=keepLib;if(keepGdp)state.settings.gdp=keepGdp;syncGdp();
+  Object.keys(EX_NOTE).forEach(k=>delete EX_NOTE[k]);Object.keys(EX_CUR).forEach(k=>delete EX_CUR[k]);
+  saveLocal();enterApp("project");
+}
+document.getElementById("newProj").onclick=newProject;
 loadLocal();
 renderLanding();

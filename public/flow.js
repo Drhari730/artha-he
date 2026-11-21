@@ -31,7 +31,7 @@ const METHOD_TEXT={
 };
 
 function proj(){if(!state.project)state.project={};return state.project;}
-function markRun(k){state.runs=state.runs||{};state.runs[k]=new Date().toISOString();}
+function markRun(k){state.runs=state.runs||{};state.runs[k]=new Date().toISOString();if(typeof syncNav==="function")syncNav();}
 function ran(k){return !!(state.runs&&state.runs[k]);}
 function projMethod(){const o=OUTCOMES[proj().outcome];return o?o.method:null;}
 function isFull(){return proj().scale==="full";}
