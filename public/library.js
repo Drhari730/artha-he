@@ -12,7 +12,9 @@
 // Library version 2: official India figures supplied and checked by the user
 // (21 Nov 2026) with their sources. Values without a confirmed price year stay
 // "not verified" until it is added.
-const LIB_VERSION=2, LIB_CHECKED="2026-11-21";
+const LIB_VERSION=3, LIB_CHECKED="2026-11-21";
+// Unit costs shipped as unverified placeholders before v3; removed from saved libraries on upgrade.
+const INDICATIVE_COSTS=[["Outpatient consultation (public, secondary)",300],["Inpatient bed-day (public, general ward)",2500],["Inpatient bed-day (public, ICU)",7000],["Complete blood count (CBC)",150],["Biochemistry panel",400],["X-ray (single view)",200],["ECG",100],["Ultrasound",600],["ANM / health-worker time",120],["Staff nurse time",250],["Medical officer time",600],["Ambulance trip",500]].map(([item,value])=>({item,value}));
 const OFFICIAL_LIB={
   gdp:{value:243803,year:"FY 2025-26 (PE)",source:"RBI Handbook of Statistics on Indian Economy, Table 1 (NSO); current prices, 2022-23 base",url:"https://www.rbi.org.in/Scripts/AnnualPublications.aspx?head=Handbook+of+Statistics+on+Indian+Economy",verified:true,verifiedOn:LIB_CHECKED,
     series:[{fy:"2022-23",gdp:188862,nni:159557},{fy:"2023-24",gdp:207699,nni:176465},{fy:"2024-25 (FRE)",gdp:225896,nni:192774},{fy:"2025-26 (PE)",gdp:243803,nni:208090}]},
@@ -32,7 +34,7 @@ const OFFICIAL_LIB={
 function refLib(){
   if(!state.refLib){
     state.refLib={version:LIB_VERSION,gdp:JSON.parse(JSON.stringify(OFFICIAL_LIB.gdp)),cpi:JSON.parse(JSON.stringify(OFFICIAL_LIB.cpi)),lifeTables:[],
-      unitCosts:JSON.parse(JSON.stringify(OFFICIAL_LIB.unitCosts)).concat(REFDATA.unitCosts.filter(u=>!/consultation|bed-day \(public, general/i.test(u.item)).map(u=>Object.assign({},u,{source:"Indicative: replace with the CGHS rate",year:2024,verified:false}))),
+      unitCosts:JSON.parse(JSON.stringify(OFFICIAL_LIB.unitCosts)),
       utilities:REFDATA.weights.map(w=>({state:w.state,util:w.util,dw:w.dw,source:w.basis,verified:false})),notes:REFDATA.thresholds};
   }
   const L=state.refLib;
@@ -40,7 +42,11 @@ function refLib(){
     if(!(L.gdp&&L.gdp.verified))L.gdp=JSON.parse(JSON.stringify(OFFICIAL_LIB.gdp));
     if(!(L.cpi&&L.cpi.verified&&L.cpi.rows.length))L.cpi=JSON.parse(JSON.stringify(OFFICIAL_LIB.cpi));
     const have=new Set(L.unitCosts.map(u=>u.item));L.unitCosts=OFFICIAL_LIB.unitCosts.filter(u=>!have.has(u.item)).map(u=>Object.assign({},u)).concat(L.unitCosts);
-    L.notes=REFDATA.thresholds;L.version=LIB_VERSION;
+    L.notes=REFDATA.thresholds;
+    // v3: drop the old indicative unit costs, but only those still exactly as originally supplied (never the user's edits)
+    const orig=new Map(INDICATIVE_COSTS.map(u=>[u.item,u.value]));
+    L.unitCosts=L.unitCosts.filter(u=>u.verified||!(orig.has(u.item)&&orig.get(u.item)===+u.value&&/^Indicative|NHSRC/.test(u.source||"")));
+    L.version=LIB_VERSION;
   }
   if(!L.srsSeeded&&SRS.data){if(!L.lifeTables.some(t=>t.srs))["Total","Male","Female"].forEach(sx=>L.lifeTables.push(srsEntry("India","Total",sx)));L.srsSeeded=true;}
   return L;

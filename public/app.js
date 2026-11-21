@@ -186,6 +186,7 @@ const state={
   module:"home",
   settings:{gdp:GDP_DEFAULT},
   project:{refCase:"htain",setting:"India"},runs:{},provenance:{},
+  refLib:null,survival:null,scenarios:null,refUsedMap:{},  // must be declared here so saved sessions and project files restore them
   costing:{method:"micro",toYear:2024,inflation:.05,rows:[],totalCost:0,output:0,
     adv:{discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]}},
   oop:{income:0,nonFood:0,items:[]},
@@ -1231,21 +1232,6 @@ const REFDATA={
     {item:"Price index for cost inflation",value:"CPI-IW (2016 = 100)",basis:"One continuous series; MoSPI's general CPI moved to a 2024 = 100 base in Feb 2026, breaking the long-run CPI Health series. Link to the 2001 series with factor 2.88.",source:"Labour Bureau; RBI Handbook Table 37",url:"https://labourbureau.gov.in"},
     {item:"CGHS package-rate adjustments",value:"Base rate ±",basis:"Non-NABH/NABL −15%; super-speciality +15%; Tier-III cities −20%; general ward −5%; private ward +5% (semi-private is the base). Consultations CN001/CN002 ₹350 at every hospital type.",source:"CGHS O.M. 03.10.2025 (effective 13.10.2025)",url:"https://cghs.mohfw.gov.in"}
   ],
-  unitCosts:[
-    {item:"Outpatient consultation (public, secondary)",value:300,unit:"per visit",category:"Direct medical"},
-    {item:"Inpatient bed-day (public, general ward)",value:2500,unit:"per day",category:"Direct medical"},
-    {item:"Inpatient bed-day (public, ICU)",value:7000,unit:"per day",category:"Direct medical"},
-    {item:"Complete blood count (CBC)",value:150,unit:"per test",category:"Direct medical"},
-    {item:"Biochemistry panel",value:400,unit:"per test",category:"Direct medical"},
-    {item:"X-ray (single view)",value:200,unit:"per film",category:"Direct medical"},
-    {item:"ECG",value:100,unit:"per test",category:"Direct medical"},
-    {item:"Ultrasound",value:600,unit:"per scan",category:"Direct medical"},
-    {item:"ANM / health-worker time",value:120,unit:"per hour",category:"Direct medical"},
-    {item:"Staff nurse time",value:250,unit:"per hour",category:"Direct medical"},
-    {item:"Medical officer time",value:600,unit:"per hour",category:"Direct medical"},
-    {item:"Ambulance trip",value:500,unit:"per trip",category:"Direct non-medical"}
-  ],
-  unitCostSource:{name:"NHSRC — Cost of Health Services in India (CHSI) & CGHS rate list",url:"https://nhsrcindia.org"},
   weights:[
     {state:"No disability / full health",dw:0.00,util:1.00,basis:"by definition"},
     {state:"Mild",dw:0.05,util:0.95,basis:"indicative band"},
