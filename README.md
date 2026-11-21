@@ -55,7 +55,7 @@ Rscript tests/run_tests.R
 Rscript validation/validate_darth.R
 ```
 
-The `testthat` suite covers the Markov engine (closed-form checks, DARTH Sick-Sicker parameters against a separately written reference implementation, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
+The engine **reproduces the published DARTH Sick-Sicker base case** (all four strategies; costs to the dollar, QALYs to two decimals, the same ICERs). The `testthat` suite covers the Markov engine (DARTH, closed-form checks, Simpson weights, treatment effects, mass conservation, input validation), the incremental analysis (strong and extended dominance), PSA (reproducibility, absorbing states, correlated sampling, the per-parameter mode), and costing, out-of-pocket and budget impact. CI runs it on every push (`.github/workflows/engine-tests.yml`), and the Docker build fails if a test fails. See `validation/VALIDATION.md` for what is and is not validated.
 
 ## Deploy (Railway)
 
@@ -79,12 +79,16 @@ legacy-shiny/       # earlier R/Shiny prototype (not used by the web app)
 
 ## Key conventions
 
-- The Markov cohort starts in the first state. Occupancy uses the trapezoidal (half-cycle) rule, and cycle *t* is discounted at (1+r)^((t−1)·cycle).
-- Transition-matrix rows must sum to 1. Rows within 0.001 of 1 are renormalised; anything further off is rejected with a message.
-- A strategy's "added cost" applies to every non-absorbing state.
-- The optimal strategy is the one with the highest net monetary benefit at the willingness-to-pay threshold.
-- Catastrophic health expenditure counts **direct medical** payments only (SDG 3.8.2 / WHO). Transport and lost income are reported, but excluded from the ratios.
-- PSA uses a fixed random seed by default, so results are reproducible. You can change the seed in the Sensitivity tab.
+- **Trace and discounting (as in DARTH):** the cohort starts in the first state. Trace row *t* (time *t*·cycle) is weighted by the within-cycle correction and discounted at (1+r)^(t·cycle). Per-cycle costs and utilities are multiplied by the cycle length.
+- **Within-cycle correction:** half-cycle (trapezoidal, the default) or Simpson's 1/3. For an odd number of cycles, Simpson uses the 3/8 rule over the last three cycles, as DARTH v0.3.0 does.
+- **Transition matrices:** rows must sum to 1. Rows within 0.001 of 1 are renormalised; anything further off is rejected with a message.
+- **Treatment effects:** a strategy can be defined as a hazard ratio, relative risk or odds ratio applied to chosen transitions of a baseline strategy's matrix. HR gives p′ = 1 − (1 − p)^HR, RR gives p′ = min(1, p·RR), and OR is applied on the odds scale. The probability that moves comes from (or goes to) staying in the same state. In PSA the effect is drawn from a lognormal distribution fitted to its 95% CI, and applied to the *sampled* baseline.
+- **Strategy-specific rewards:** a strategy's added cost can apply to chosen states only (default: all non-absorbing states), and a strategy can override the utility of any state.
+- **Background mortality:** uses your own life table (age, annual q). The built-in table is crude and for illustration only.
+- **Optimal strategy:** the one with the highest net monetary benefit at the willingness-to-pay threshold. The GDP-per-capita threshold is editable and saved with the project.
+- **DSA ranges:** the 95% interval of each per-parameter PSA distribution; each treatment effect's 95% CI; discounting from 0% to 5%. Any other parameter uses an assumed ±30% (costs) or ±0.1 (utilities), and the tornado labels which.
+- **Catastrophic health expenditure:** counts **direct medical** payments only (SDG 3.8.2 / WHO). Transport and lost income are reported, but excluded from the ratios.
+- **PSA reproducibility:** PSA uses a fixed random seed by default, so results are reproducible. You can change the seed in the Sensitivity tab.
 
 ---
 *For research & teaching. Verify all inputs against your study protocol before use.*

@@ -8,6 +8,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 # rocker/r-ver installs packages from a dated CRAN snapshot (Posit Package Manager),
 # so these versions are fixed by the image tag above.
@@ -15,6 +16,7 @@ RUN R -e "install.packages(c('plumber', 'jsonlite', 'testthat'))"
 
 COPY engine.R plumber.R run.R /app/
 COPY tests /app/tests
+COPY validation /app/validation
 COPY public /app/public
 
 # Fail the build if the engine tests fail.

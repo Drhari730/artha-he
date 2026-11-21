@@ -6,7 +6,8 @@
    Standard published HE methods, covered by tests/testthat.
    ============================================================================= */
 
-const RUPEE="₹", GDP_PC=200000;
+const RUPEE="₹", GDP_DEFAULT=200000;
+let GDP_PC=GDP_DEFAULT; // per-capita GDP used for the 1× / 3× threshold markers; editable (state.settings.gdp)
 const COST_CATEGORIES=["Direct medical","Direct non-medical","Indirect (productivity)"];
 const C={primary:"#5B4BD6",primaryL:"#7261F0",gold:"#C8971F",emerald:"#0E9E78",amber:"#DD9430",red:"#DC4B4B",ink:"#1A1733",muted:"#6E6A86",line:"#E5E3F0"};
 const SERIES=[C.primary,C.gold,C.emerald,C.amber,C.red,"#6E6A86"];
@@ -16,6 +17,12 @@ const fmtINR=(x,dp=0)=>RUPEE+Number(x).toLocaleString("en-IN",{minimumFractionDi
 const fmtNum=(x,dp=2)=>Number(x).toLocaleString("en-IN",{minimumFractionDigits:dp,maximumFractionDigits:dp});
 const pct=(x,dp=1)=>(x*100).toFixed(dp)+"%";
 const compactINR=x=>{const a=Math.abs(x);if(a>=1e7)return RUPEE+(x/1e7).toFixed(2)+" Cr";if(a>=1e5)return RUPEE+(x/1e5).toFixed(2)+" L";return fmtINR(x);};
+
+/* ---------- willingness-to-pay threshold (GDP per capita) ---------- */
+function syncGdp(){const g=+(state.settings&&state.settings.gdp);GDP_PC=g>0?g:GDP_DEFAULT;}
+const wtpMax=()=>Math.max(1000000,Math.ceil(GDP_PC*3/100000)*100000);
+function gdpField(){return `<div class="field"><label>GDP per capita for the threshold (₹)</label><input type="number" id="gdpPc" min="1" step="1000" value="${GDP_PC}"><p class="hint" style="margin-top:4px">Sets the 1× / 3× GDP markers. Use the latest per-capita GDP from MoSPI (or your country's statistics office).</p></div>`;}
+function wireGdp(){const el=document.getElementById("gdpPc");if(!el)return;el.onchange=()=>{const v=+el.value;if(!(v>0))return;state.settings.gdp=v;syncGdp();saveLocal();route(state.module);};}
 
 /* ---------- safety: strip HTML from text that arrives from files or storage ---------- */
 const escHTML=t=>String(t==null?"":t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -57,6 +64,12 @@ function fixModel(m){ // ensure each strategy matrix is n×n
   m.strategies.forEach(s=>{const M=[];for(let i=0;i<n;i++){const row=[];for(let j=0;j<n;j++){const v=s.matrix&&s.matrix[i]&&s.matrix[i][j]!=null?+s.matrix[i][j]:(i===j?1:0);row.push(v);}M.push(row);}s.matrix=M;});
 }
 function rowSum(row){return sum(row.map(Number));}
+// Preview of a strategy defined by a treatment effect on a baseline (same formulas as engine.R).
+function effectMatrixJS(base,eff){const P=base.map(r=>r.map(Number)),v=+eff.value,me=(eff.measure||"hr").toLowerCase();
+  (eff.transitions||[]).forEach(([i,j])=>{if(i===j||!P[i]||P[i][j]==null)return;const p0=P[i][j];
+    const p1=me==="rr"?Math.min(1,p0*v):me==="or"?(p0>=1?1:(o=>o/(1+o))(p0/(1-p0)*v)):1-Math.pow(1-p0,v);P[i][j]=p1;P[i][i]-=p1-p0;});return P;}
+function stratMatrix(m,s){if(s.effect){const b=m.strategies[s.effect.baseline];if(b&&!b.effect)return effectMatrixJS(b.matrix,s.effect);}return s.matrix;}
+function parseLifeTable(t){const rows=[];String(t||"").split(/\r?\n/).forEach(l=>{const c=l.split(/[,;\t ]+/).filter(Boolean);if(c.length>=2&&isFinite(+c[0])&&isFinite(+c[1]))rows.push({age:+c[0],q:+c[1]});});return rows;}
 
 /* ---------- CSV + templates + export ---------- */
 function parseCSV(t){const L=t.trim().split(/\r?\n/),h=L[0].split(",").map(s=>s.trim());return scrub(L.slice(1).map(ln=>{const c=ln.split(",");const o={};h.forEach((k,i)=>o[k]=(c[i]||"").trim());return o;}));}
@@ -156,14 +169,22 @@ function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xm
   [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax){g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i+1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});}});
   g+=`<polyline points="${curve.map(c=>`${X(c.wtp)},${Y(c.prob)}`).join(" ")}" fill="none" stroke="${C.primary}" stroke-width="2.6"/>`;
   g+=txt(ox+pw/2,H-12,"Willingness-to-pay per QALY (₹)",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
-function tornado(rows){const W=680,rh=44,H=rows.length*rh+38,padL=200,mid=padL+(W-padL-40)/2,max=Math.max(...rows.map(r=>Math.max(Math.abs(r.high-r.base),Math.abs(r.low-r.base))),1),half=(W-padL-40)/2,scale=v=>(v/max)*half;let g="";
-  g+=`<line x1="${mid}" y1="12" x2="${mid}" y2="${H-20}" stroke="${C.ink}" stroke-width="1.2"/>`+txt(mid,H-6,"Net monetary benefit swing",{anchor:"middle",fill:C.muted,size:10.5});
-  rows.forEach((r,i)=>{const y=18+i*rh,loW=scale(r.base-r.low),hiW=scale(r.high-r.base);g+=`<rect x="${mid-loW}" y="${y}" width="${loW}" height="24" rx="4" fill="${C.amber}"><title>${r.label} — low: NMB ${compactINR(r.low)}</title></rect><rect x="${mid}" y="${y}" width="${hiW}" height="24" rx="4" fill="${C.primary}"><title>${r.label} — high: NMB ${compactINR(r.high)}</title></rect>`+txt(padL-14,y+17,r.label,{anchor:"end",fill:C.ink,size:12});});
+function tornado(rows){const W=680,rh=50,H=rows.length*rh+38,padL=230,mid=padL+(W-padL-40)/2,half=(W-padL-40)/2;
+  const v=r=>[r.nmbAtLo!=null?r.nmbAtLo:r.low,r.nmbAtHi!=null?r.nmbAtHi:r.high];
+  const max=Math.max(...rows.map(r=>Math.max(...v(r).map(x=>Math.abs(x-r.base)))),1),scale=x=>(x/max)*half;
+  const fv=(r,x)=>/discount/i.test(r.label)?pct(x,0):/cost/i.test(r.label)?compactINR(x):fmtNum(x,2);
+  let g=`<line x1="${mid}" y1="12" x2="${mid}" y2="${H-20}" stroke="${C.ink}" stroke-width="1.2"/>`+txt(mid,H-6,"Net monetary benefit (base case at the centre line)",{anchor:"middle",fill:C.muted,size:10.5});
+  rows.forEach((r,i)=>{const y=14+i*rh,[a,b]=v(r);
+    [[a,C.amber,"low"],[b,C.primary,"high"]].forEach(([x,col,which])=>{const d=scale(x-r.base),x0=d<0?mid+d:mid;
+      g+=`<rect x="${x0}" y="${y}" width="${Math.abs(d)}" height="22" rx="4" fill="${col}" opacity="0.9"><title>${escHTML(r.label)}: ${which} value ${fv(r,which==="low"?r.loVal:r.hiVal)} → NMB ${compactINR(x)}</title></rect>`;});
+    g+=txt(padL-14,y+12,r.label,{anchor:"end",fill:C.ink,size:12});
+    if(r.loVal!=null)g+=txt(padL-14,y+27,`${fv(r,r.loVal)} – ${fv(r,r.hiVal)} · ${r.source||""}`,{anchor:"end",fill:C.muted,size:10});});
   return svgWrap(W,H,g);}
 
 /* ============================ STATE ============================ */
 const state={
   module:"home",
+  settings:{gdp:GDP_DEFAULT},
   costing:{method:"micro",toYear:2024,inflation:.05,rows:[],totalCost:0,output:0,
     adv:{discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]}},
   oop:{income:0,nonFood:0,items:[]},
@@ -176,7 +197,7 @@ const state={
     strategies:[
       {name:"Comparator",addCost:0,matrix:[[1,0,0],[0,1,0],[0,0,1]]},
       {name:"Intervention",addCost:0,matrix:[[1,0,0],[0,1,0],[0,0,1]]}],
-    cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1,startAge:30,bgMortality:false},
+    cycle:1,horizon:30,dCost:.03,dEff:.03,wtp:GDP_PC,outcome:"QALY",lifeExp:25,activeStrat:1,startAge:30,bgMortality:false,correction:"half-cycle",lifeTableText:""},
   sens:{N:1000,wtp:GDP_PC,ref:0,cmp:1,cv:0.2,seed:20251121},
   bia:{population:0,eligible:0,maxUptake:0,horizon:5,startYear:2025,costNew:0,costOld:0},
   vb:{tool:"qaly",
@@ -264,15 +285,22 @@ const EXAMPLES={
       {strategy:"Usual care",cost:45000,effect:7.8},{strategy:"mHealth app + usual care",cost:62000,effect:8.5}]}
   },
   model:{
-    general:{note:"General: a new treatment that slows disease progression (Healthy→Sick→Dead).",outcome:"QALY",activeStrat:1,states:[
+    general:{note:"General: a new treatment that slows disease progression (Healthy→Sick→Dead).",outcome:"QALY",activeStrat:1,cycle:1,horizon:30,startAge:30,correction:"half-cycle",bgMortality:false,wtp:GDP_PC,dCost:.03,dEff:.03,states:[
       {name:"Healthy",cost:2000,util:.92,dw:.05,absorbing:false},{name:"Sick",cost:14000,util:.62,dw:.40,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
       strategies:[{name:"Standard care",addCost:0,matrix:[[.84,.15,.01],[0,.90,.10],[0,0,1]]},{name:"New treatment",addCost:9000,matrix:[[.893,.0975,.0095],[0,.90,.10],[0,0,1]]}]},
-    public:{note:"Public health: a screen-and-treat programme vs no programme.",outcome:"QALY",activeStrat:1,states:[
+    public:{note:"Public health: a screen-and-treat programme vs no programme.",outcome:"QALY",activeStrat:1,cycle:1,horizon:30,startAge:30,correction:"half-cycle",bgMortality:false,wtp:GDP_PC,dCost:.03,dEff:.03,states:[
       {name:"At risk",cost:500,util:.95,dw:.02,absorbing:false},{name:"Disease",cost:18000,util:.65,dw:.35,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
       strategies:[{name:"No programme",addCost:0,matrix:[[.88,.11,.01],[0,.90,.10],[0,0,1]]},{name:"Screen & treat",addCost:800,matrix:[[.925,.07,.005],[0,.92,.08],[0,0,1]]}]},
-    digital:{note:"Digital health: a digital adherence tool vs standard care.",outcome:"QALY",activeStrat:1,states:[
+    digital:{note:"Digital health: a digital adherence tool vs standard care.",outcome:"QALY",activeStrat:1,cycle:1,horizon:30,startAge:30,correction:"half-cycle",bgMortality:false,wtp:GDP_PC,dCost:.03,dEff:.03,states:[
       {name:"On treatment",cost:3000,util:.85,dw:.10,absorbing:false},{name:"Poor control",cost:16000,util:.60,dw:.40,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
-      strategies:[{name:"Standard care",addCost:0,matrix:[[.80,.18,.02],[.20,.70,.10],[0,0,1]]},{name:"Digital adherence tool",addCost:1500,matrix:[[.90,.085,.015],[.35,.58,.07],[0,0,1]]}]}
+      strategies:[{name:"Standard care",addCost:0,matrix:[[.80,.18,.02],[.20,.70,.10],[0,0,1]]},{name:"Digital adherence tool",addCost:1500,matrix:[[.90,.085,.015],[.35,.58,.07],[0,0,1]]}]},
+    darth:{note:"Validation: the DARTH Sick-Sicker model (Alarid-Escudero et al., Med Decis Making 2023), values in US$. Published base case (v0.3.0): costs $152,282 / $285,889 / $260,222 / $380,378 and QALYs 21.03 / 21.83 / 22.50 / 23.46 for SoC / A / B / AB; ICERs B $73,279, AB $125,302; A dominated.",
+      outcome:"QALY",activeStrat:2,cycle:1,horizon:75,startAge:25,correction:"simpson",bgMortality:false,dCost:.03,dEff:.03,wtp:100000,
+      states:[{name:"Healthy",cost:2000,util:1,dw:0,absorbing:false},{name:"Sick",cost:4000,util:.75,dw:0,absorbing:false},{name:"Sicker",cost:15000,util:.5,dw:0,absorbing:false},{name:"Dead",cost:0,util:0,dw:0,absorbing:true}],
+      strategies:[{name:"Standard of care",addCost:0,matrix:[[0.8589882807,0.1390137179,0,0.001998001333],[0.3911155926,0.5038231564,0.09907921512,0.005982035946],[0,0,0.9801986733,0.01980132669],[0,0,0,1]]},
+        {name:"Strategy A",addCost:12000,addCostStates:[1,2],utilOverride:[null,.95,null,null],matrix:[[0.8589882807,0.1390137179,0,0.001998001333],[0.3911155926,0.5038231564,0.09907921512,0.005982035946],[0,0,0.9801986733,0.01980132669],[0,0,0,1]]},
+        {name:"Strategy B",addCost:13000,addCostStates:[1,2],matrix:[[0.8589882807,0.1390137179,0,0.001998001333],[0.3911155926,0.5422110875,0.06069128398,0.005982035946],[0,0,0.9801986733,0.01980132669],[0,0,0,1]]},
+        {name:"Strategy AB",addCost:25000,addCostStates:[1,2],utilOverride:[null,.95,null,null],matrix:[[0.8589882807,0.1390137179,0,0.001998001333],[0.3911155926,0.5422110875,0.06069128398,0.005982035946],[0,0,0.9801986733,0.01980132669],[0,0,0,1]]}]}
   },
   bia:{
     general:{note:"General: budget impact of adopting a new treatment.",population:1000000,eligible:.05,maxUptake:.6,horizon:5,startYear:2025,costNew:90000,costOld:40000},
@@ -282,10 +310,10 @@ const EXAMPLES={
 };
 const EX_NOTE={}, EX_CUR={};
 const RENDERERS={costing:["renderCostingSidebar","renderCosting"],oop:["renderOopSidebar","renderOop"],evaluation:["renderEvalSidebar","renderEval"],model:["renderModelSidebar","renderModel"],bia:["renderBiaSidebar","renderBia"]};
-function loadExample(mod,key){const ex=EXAMPLES[mod][key];if(!ex)return;const {note,...data}=JSON.parse(JSON.stringify(ex));Object.assign(state[mod],data);EX_NOTE[mod]=note;EX_CUR[mod]=key;const[sb,rn]=RENDERERS[mod];window[sb]();window[rn]();saveLocal();}
+function loadExample(mod,key){const ex=EXAMPLES[mod][key];if(!ex)return;const {note,...data}=JSON.parse(JSON.stringify(ex));Object.assign(state[mod],data);if(mod==="model"&&state.sens)state.sens.params=null;EX_NOTE[mod]=note;EX_CUR[mod]=key;const[sb,rn]=RENDERERS[mod];window[sb]();window[rn]();saveLocal();}
 function exRow(mod){const cur=EX_CUR[mod];const b=(k,l)=>`<button data-ex="${k}" class="${cur===k?'active':''}">${l}</button>`;
   return `<div class="start-note"><span class="sn-title">▶ To run your analysis</span>Enter your own data in the fields below, or download a <b>template</b>, fill it in and upload — then click the button to run.</div>
-  <div class="ex-row"><span class="ex-lab">Just exploring? Load a worked example to see how it works</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
+  <div class="ex-row"><span class="ex-lab">Just exploring? Load a worked example to see how it works</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}${mod==="model"?b("darth","DARTH (validation)"):""}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
 function wireExamples(mod){document.querySelectorAll("#sidebar .ex-row [data-ex]").forEach(b=>b.onclick=()=>loadExample(mod,b.dataset.ex));}
 
 /* ============================ HOME ============================ */
@@ -568,7 +596,8 @@ function renderEvalSidebar(){
     <div class="callout"><b>${t.abbr} — ${t.name}.</b> ${t.def}</div>
     <div class="grid-wrap"><table class="data-grid"><thead><tr><th>Strategy</th><th>Cost ₹</th><th>${e.type==="CBA"?"Benefit ₹":e.type==="CUA"?"QALYs":"Effect"}</th><th></th></tr></thead><tbody id="evalRows">${rows}</tbody></table></div>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Add</button><button class="btn btn-ghost sm" id="clearStrat">Clear all</button><label class="btn btn-ghost sm" style="margin:0">Import CSV<input type="file" id="evalFile" accept=".csv"></label><button class="btn btn-ghost sm" id="tplEval">Template</button></div>
-    ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="1000000" step="25000" value="${e.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-wtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-wtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>`:""}
+    ${t.wtp?`<div class="field"><label>WTP per QALY <span class="lab-val" id="wtpLab">${compactINR(e.wtp)}</span></label><input type="range" id="wtp" min="0" max="${wtpMax()}" step="25000" value="${e.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-wtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-wtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>`:""}
+    ${t.wtp?gdpField():""}
     <div class="divider"></div><button class="btn btn-primary btn-block" id="analyseBtn">Analyse</button>`;
   document.querySelectorAll("#evalType button").forEach(b=>b.onclick=()=>{e.type=b.dataset.t;renderEvalSidebar();renderEval();});
   const adv=document.getElementById("advisor");adv.onchange=()=>{const a=ADVISOR[adv.value];const out=document.getElementById("advOut");if(!a){out.innerHTML="";return;}out.innerHTML=`<div class="rec">→ Recommended: ${a.t}</div><p style="font-size:11.5px;color:var(--ink-soft);line-height:1.45">${a.why}</p><button class="btn btn-primary sm" id="useType" style="margin-top:6px">Use ${a.t}</button>`;document.getElementById("useType").onclick=()=>{e.type=a.t;renderEvalSidebar();renderEval();};};
@@ -580,7 +609,7 @@ function renderEvalSidebar(){
   document.getElementById("evalFile").onchange=ev=>{const f=ev.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{e.strats=parseCSV(rd.result).map(r=>({strategy:r.strategy,cost:+r.cost,effect:+r.effect}));renderEvalSidebar();renderEval();};rd.readAsText(f);};
   const w=document.getElementById("wtp");if(w)w.oninput=()=>{e.wtp=+w.value;document.getElementById("wtpLab").textContent=compactINR(+w.value);};
   document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{e.wtp=+b.dataset.wtp;renderEvalSidebar();renderEval();});
-  document.getElementById("analyseBtn").onclick=renderEval;
+  document.getElementById("analyseBtn").onclick=renderEval;wireGdp();
   wireExamples("evaluation");
 }
 function reqCard(req,typeName){
@@ -633,13 +662,34 @@ async function renderEval(){
 }
 
 /* ============================ MODELING ============================ */
+function effectEditor(m,as){
+  const e=as.effect,base=m.strategies[e.baseline],B=base?base.matrix:[];
+  const opts=m.strategies.map((o,i)=>o===as||o.effect?"":`<option value="${i}" ${i===e.baseline?"selected":""}>${escHTML(o.name)}</option>`).join("");
+  const has=(i,j)=>(e.transitions||[]).some(t=>t[0]===i&&t[1]===j);
+  const trs=[];m.states.forEach((si,i)=>{if(si.absorbing)return;m.states.forEach((sj,j)=>{if(i!==j&&B[i]&&+B[i][j]>0)trs.push(`<label style="display:block;font-size:11.5px;text-transform:none;letter-spacing:0;margin:2px 0"><input type="checkbox" data-etr="${i},${j}" ${has(i,j)?"checked":""} style="width:auto;vertical-align:-2px;margin-right:6px">${escHTML(si.name)} → ${escHTML(sj.name)} <span style="color:var(--muted);font-family:var(--mono)">(p = ${(+B[i][j]).toFixed(4)})</span></label>`);});});
+  const P=effectMatrixJS(B,e),head=m.states.map(x=>`<th>${escHTML(x.name)}</th>`).join("");
+  const prev=P.map((row,i)=>`<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px">${escHTML(m.states[i].name)}</td>${row.map((v,j)=>`<td style="text-align:right;font-family:var(--mono);font-size:10.5px;padding:6px 8px;${has(i,j)?"color:var(--primary);font-weight:700":""}${v<0?";color:var(--red)":""}">${v.toFixed(4)}</td>`).join("")}</tr>`).join("");
+  return `<p class="hint" style="margin:-2px 0 8px">Takes the baseline strategy's matrix and applies the effect to the transitions you tick. The probability that moves goes to or from staying in the same state. In PSA the effect is sampled from its 95% CI (lognormal).</p>
+    <div class="field two"><div><label>Baseline strategy</label><select id="effBase">${opts}</select></div><div><label>Effect measure</label><select id="effMeas"><option value="hr" ${e.measure==="hr"?"selected":""}>Hazard ratio</option><option value="rr" ${e.measure==="rr"?"selected":""}>Relative risk</option><option value="or" ${e.measure==="or"?"selected":""}>Odds ratio</option></select></div></div>
+    <div class="field two"><div><label>Estimate</label><input type="number" step="0.01" id="effVal" value="${e.value}"></div><div><label>95% CI low – high</label><div style="display:flex;gap:6px"><input type="number" step="0.01" id="effLo" value="${e.lo==null?"":e.lo}" placeholder="low"><input type="number" step="0.01" id="effHi" value="${e.hi==null?"":e.hi}" placeholder="high"></div></div></div>
+    <div class="sublabel">Apply to these transitions</div>
+    <div style="margin-bottom:8px">${trs.join("")||'<p class="hint">The baseline has no transitions between different states yet.</p>'}</div>
+    <div class="sublabel">Resulting matrix (read-only)</div>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>from\\to</th>${head}</tr></thead><tbody>${prev}</tbody></table></div>`;
+}
+function wireEffectEditor(m,as){const e=as.effect;
+  const on=(id,f)=>{const el=document.getElementById(id);if(el)el.onchange=()=>{f(el.value);renderModelSidebar();};};
+  on("effBase",v=>{e.baseline=+v;e.transitions=[];});on("effMeas",v=>e.measure=v);on("effVal",v=>e.value=+v);
+  on("effLo",v=>e.lo=v===""?"":+v);on("effHi",v=>e.hi=v===""?"":+v);
+  document.querySelectorAll("[data-etr]").forEach(el=>el.onchange=()=>{e.transitions=[...document.querySelectorAll("[data-etr]")].filter(x=>x.checked).map(x=>x.dataset.etr.split(",").map(Number));renderModelSidebar();});
+}
 function renderModelSidebar(){
   const m=state.model;fixModel(m);
   const stRows=m.states.map((s,i)=>`<tr><td><input data-sf="name" data-i="${i}" value="${s.name}"></td><td><input data-sf="cost" data-i="${i}" type="number" value="${s.cost}" style="text-align:right"></td><td><input data-sf="util" data-i="${i}" type="number" step="0.01" value="${s.util}" style="text-align:right"></td><td><input data-sf="dw" data-i="${i}" type="number" step="0.01" value="${s.dw}" style="text-align:right"></td><td style="text-align:center"><input data-sf="absorbing" data-i="${i}" type="checkbox" ${s.absorbing?"checked":""}></td><td class="row-del" data-sdel="${i}">&times;</td></tr>`).join("");
   const strBtns=m.strategies.map((s,i)=>`<button data-strat="${i}" class="${m.activeStrat===i?"active":""}">${s.name}</button>`).join("");
   const as=m.strategies[m.activeStrat];
   const head=m.states.map(s=>`<th>${s.name}</th>`).join("");
-  const matRows=as.matrix.map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
+  const matRows=(as.effect?[]:as.matrix).map((row,i)=>{const rs=rowSum(row);const cells=row.map((v,j)=>`<td><input data-mr="${i}" data-mc="${j}" type="number" step="0.01" value="${(+v).toFixed(4).replace(/0+$/,"").replace(/\.$/,"")}" style="text-align:right"></td>`).join("");return `<tr><td style="font-family:var(--sans);font-weight:600;font-size:10px;padding:6px 8px;white-space:nowrap">${m.states[i].name}</td>${cells}<td style="text-align:center;font-family:var(--mono);font-size:10px;color:${Math.abs(rs-1)<0.005?'var(--emerald)':'var(--red)'}">${rs.toFixed(2)}</td></tr>`;}).join("");
   document.getElementById("sidebar").innerHTML=`<h2><span class="section-num">04</span> Markov model</h2>
     <p class="hint">A fully configurable state-transition model. Edit the states, each strategy's transition matrix, and the settings.</p>
     ${exRow("model")}
@@ -648,19 +698,28 @@ function renderModelSidebar(){
     <div class="btn-row"><button class="btn btn-secondary sm" id="addState">+ State</button></div>
     <div class="sublabel">Strategies &amp; transition matrix</div>
     <div class="seg types" id="stratSel">${strBtns}</div>
-    <div class="field two"><div><label>Strategy name</label><input type="text" id="stratName" value="${as.name}"></div><div><label>Added cost / cycle</label><input type="number" id="stratAdd" value="${as.addCost}"></div></div>
-    <p class="hint" style="margin:-4px 0 8px">Row = from-state, column = to-state. Each row should sum to 1.0 (shown right).</p>
-    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>from\\to</th>${head}<th>Σ</th></tr></thead><tbody id="matRows">${matRows}</tbody></table></div>
+    <div class="field two"><div><label>Strategy name</label><input type="text" id="stratName" value="${escHTML(as.name)}"></div><div><label>Added cost / cycle</label><input type="number" id="stratAdd" value="${as.addCost}"></div></div>
+    <div class="seg" id="trMode" style="margin-bottom:8px"><button data-tm="matrix" class="${as.effect?"":"active"}">Own transition matrix</button><button data-tm="effect" class="${as.effect?"active":""}">Treatment effect on a baseline</button></div>
+    ${as.effect?effectEditor(m,as):`<p class="hint" style="margin:-4px 0 8px">Row = from-state, column = to-state. Each row should sum to 1.0 (shown right).</p>
+    <div class="grid-wrap"><table class="data-grid"><thead><tr><th>from\\to</th>${head}<th>Σ</th></tr></thead><tbody id="matRows">${matRows}</tbody></table></div>`}
+    <details class="ex-row" style="border-style:solid;margin-top:8px" ${as.addCostStates||(as.utilOverride&&as.utilOverride.some(u=>u!=null&&u!==""))?"open":""}><summary style="cursor:pointer;font-weight:600;font-size:12px">Strategy-specific costs &amp; utilities</summary>
+      <p class="hint" style="margin:6px 0">Which states the added cost applies to (e.g. only while sick), and utilities that differ under this strategy. Leave a utility blank to use the state's value.</p>
+      <div class="grid-wrap"><table class="data-grid"><thead><tr><th>State</th><th>Added cost?</th><th>Utility under this strategy</th></tr></thead><tbody>${m.states.map((st,i)=>{const on=as.addCostStates?as.addCostStates.includes(i):!st.absorbing;const u=as.utilOverride&&as.utilOverride[i]!=null?as.utilOverride[i]:"";return `<tr><td style="font-size:11px;padding:6px 8px">${escHTML(st.name)}</td><td style="text-align:center"><input type="checkbox" data-acs="${i}" ${on?"checked":""}></td><td><input type="number" step="0.01" data-uo="${i}" value="${u}" placeholder="${st.util}" style="text-align:right"></td></tr>`;}).join("")}</tbody></table></div>
+    </details>
     <div class="btn-row"><button class="btn btn-secondary sm" id="addStrat">+ Strategy</button><button class="btn btn-ghost sm" id="delStrat">Remove</button></div>
     <div class="sublabel">Outcome &amp; settings</div>
     <div class="seg" id="outcomeSel"><button data-o="QALY" class="${m.outcome==="QALY"?"active":""}">QALYs</button><button data-o="DALY" class="${m.outcome==="DALY"?"active":""}">DALYs</button></div>
     ${m.outcome==="DALY"?`<div class="field"><label>Life expectancy at death (yrs, for YLL)</label><input type="number" id="lifeExp" value="${m.lifeExp}"></div>`:""}
     <div class="field two"><div><label>Cycle (yrs)</label><input type="number" id="cycle" step="0.5" value="${m.cycle}"></div><div><label>Horizon (yrs)</label><input type="number" id="horizon" value="${m.horizon}"></div></div>
     <div class="field two"><div><label>Disc. cost</label><input type="number" id="dCost" step="0.01" value="${m.dCost}"></div><div><label>Disc. effect</label><input type="number" id="dEff" step="0.01" value="${m.dEff}"></div></div>
+    <div class="field"><label>Within-cycle correction</label><select id="corr"><option value="half-cycle" ${m.correction!=="simpson"?"selected":""}>Half-cycle (trapezoidal)</option><option value="simpson" ${m.correction==="simpson"?"selected":""}>Simpson's 1/3 (as in DARTH)</option></select></div>
     <div class="sublabel">Age &amp; background mortality (time-dependent)</div>
     <div class="field two"><div><label>Cohort start age</label><input type="number" id="startAge" value="${m.startAge}"></div><div><label style="text-transform:none;letter-spacing:0"><input type="checkbox" id="bgMort" ${m.bgMortality?"checked":""} style="width:auto;vertical-align:-2px;margin-right:6px">Add age-specific background mortality</label></div></div>
-    ${m.bgMortality?`<p class="hint" style="margin-top:-6px">Illustrative age-specific all-cause mortality is applied on top of your disease transitions (so your matrix should hold <b>disease-specific</b> transitions only). Replace with your setting's life table for formal use.</p>`:""}
-    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="1000000" step="25000" value="${m.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-mwtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-mwtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>
+    ${m.bgMortality?`<p class="hint" style="margin-top:-6px">Age-specific all-cause mortality is applied on top of your disease transitions, so your matrix should hold <b>disease-specific</b> transitions only.</p>
+    <div class="field"><label>Life table: one "age, annual death probability (q)" per line</label><textarea id="lifeTable" rows="4" style="width:100%;font-family:var(--mono);font-size:11px" placeholder="0, 0.028\n1, 0.003\n5, 0.001\n…">${escHTML(m.lifeTableText||"")}</textarea>
+    <p class="hint" style="margin-top:4px">${(m.lifeTable&&m.lifeTable.length)?`Using your table (${m.lifeTable.length} age groups).`:`Empty: a crude illustrative table is used. For formal work paste an official one, e.g. the SRS abridged life table for India (by sex) or WHO GHO life tables.`}</p></div>`:""}
+    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="mwtpLab">${compactINR(m.wtp)}</span></label><input type="range" id="mwtp" min="0" max="${wtpMax()}" step="25000" value="${m.wtp}"><div class="wtp-chips"><button type="button" class="wchip" data-mwtp="${GDP_PC}">1× GDP · ${compactINR(GDP_PC)}</button><button type="button" class="wchip" data-mwtp="${GDP_PC*3}">3× GDP · ${compactINR(GDP_PC*3)}</button></div></div>
+    ${gdpField()}
     <div class="sublabel">Rate ⇄ probability helper</div>
     <div class="ex-row" style="border-style:solid">
       <div class="field two"><div><label>Value</label><input type="number" id="cvVal" step="0.01" value="0.1"></div><div><label>is a…</label><select id="cvKind"><option value="rate">rate / year</option><option value="prob">probability</option></select></div></div>
@@ -670,15 +729,34 @@ function renderModelSidebar(){
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runModel">Run model</button>`;
   // state grid
   document.querySelectorAll("#stRows [data-sf]").forEach(el=>el.onchange=()=>{const f=el.dataset.sf,i=+el.dataset.i;m.states[i][f]=f==="name"?el.value:f==="absorbing"?el.checked:+el.value;if(f==="name"||f==="absorbing")renderModelSidebar();});
-  document.querySelectorAll("#stRows .row-del").forEach(el=>el.onclick=()=>{if(m.states.length<=2)return;m.states.splice(+el.dataset.sdel,1);m.strategies.forEach(s=>{s.matrix.splice(+el.dataset.sdel,1);s.matrix.forEach(r=>r.splice(+el.dataset.sdel,1));});renderModelSidebar();});
+  document.querySelectorAll("#stRows .row-del").forEach(el=>el.onclick=()=>{if(m.states.length<=2)return;const d=+el.dataset.sdel;m.states.splice(d,1);m.strategies.forEach(s=>{s.matrix.splice(d,1);s.matrix.forEach(r=>r.splice(d,1));
+    if(s.effect)s.effect.transitions=(s.effect.transitions||[]).filter(([i,j])=>i!==d&&j!==d).map(([i,j])=>[i>d?i-1:i,j>d?j-1:j]);
+    if(s.addCostStates)s.addCostStates=s.addCostStates.filter(i=>i!==d).map(i=>i>d?i-1:i);
+    if(s.utilOverride)s.utilOverride.splice(d,1);});renderModelSidebar();});
   document.getElementById("addState").onclick=()=>{m.states.push({name:"State "+(m.states.length+1),cost:0,util:0.5,dw:0.2,absorbing:false});fixModel(m);renderModelSidebar();};
   // strategy selector
   document.querySelectorAll("#stratSel button").forEach(b=>b.onclick=()=>{m.activeStrat=+b.dataset.strat;renderModelSidebar();});
   document.getElementById("stratName").onchange=e=>{as.name=e.target.value;renderModelSidebar();};
   document.getElementById("stratAdd").onchange=e=>as.addCost=+e.target.value;
+  document.querySelectorAll("#trMode button").forEach(b=>b.onclick=()=>{const tm=b.dataset.tm,k=m.activeStrat;
+    if(tm==="effect"&&!as.effect){
+      if(m.strategies.some(o=>o.effect&&o.effect.baseline===k)){alert("Another strategy uses this one as its baseline, so it needs its own matrix.");return;}
+      const cand=m.strategies.findIndex((o,i)=>i!==k&&!o.effect);if(cand<0){alert("Add a strategy with its own matrix to use as the baseline first.");return;}
+      as.effect={baseline:cand,measure:"hr",value:1,lo:"",hi:"",transitions:[]};}
+    else if(tm==="matrix"&&as.effect){as.matrix=stratMatrix(m,as);delete as.effect;}
+    renderModelSidebar();});
+  if(as.effect)wireEffectEditor(m,as);
+  document.querySelectorAll("[data-acs]").forEach(el=>el.onchange=()=>{as.addCostStates=[...document.querySelectorAll("[data-acs]")].filter(x=>x.checked).map(x=>+x.dataset.acs);});
+  document.querySelectorAll("[data-uo]").forEach(el=>el.onchange=()=>{if(!as.utilOverride)as.utilOverride=m.states.map(()=>null);as.utilOverride[+el.dataset.uo]=el.value===""?null:+el.value;});
+  const corr=document.getElementById("corr");if(corr)corr.onchange=()=>{m.correction=corr.value;};
+  const ltEl=document.getElementById("lifeTable");if(ltEl)ltEl.onchange=()=>{m.lifeTableText=ltEl.value;m.lifeTable=parseLifeTable(ltEl.value);renderModelSidebar();};
   document.querySelectorAll("#matRows [data-mr]").forEach(el=>el.onchange=()=>{as.matrix[+el.dataset.mr][+el.dataset.mc]=+el.value;renderModelSidebar();});
   document.getElementById("addStrat").onclick=()=>{const n=m.states.length,id=[];for(let i=0;i<n;i++){const r=new Array(n).fill(0);r[i]=1;id.push(r);}m.strategies.push({name:"Strategy "+(m.strategies.length+1),addCost:0,matrix:id});m.activeStrat=m.strategies.length-1;renderModelSidebar();};
-  document.getElementById("delStrat").onclick=()=>{if(m.strategies.length<=2)return;m.strategies.splice(m.activeStrat,1);m.activeStrat=0;renderModelSidebar();};
+  document.getElementById("delStrat").onclick=()=>{if(m.strategies.length<=2)return;const k=m.activeStrat;
+    m.strategies.forEach((o,i)=>{if(i!==k&&o.effect){if(o.effect.baseline===k){o.matrix=stratMatrix(m,o);delete o.effect;}else if(o.effect.baseline>k)o.effect.baseline--;}});
+    m.strategies.splice(k,1);m.activeStrat=0;
+    if(state.sens.params&&state.sens.params.strategies)state.sens.params.strategies.splice(k,1);
+    renderModelSidebar();};
   document.querySelectorAll("#outcomeSel button").forEach(b=>b.onclick=()=>{m.outcome=b.dataset.o;renderModelSidebar();renderModel();});
   const le=document.getElementById("lifeExp");if(le)le.onchange=e=>m.lifeExp=+e.target.value;
   ["cycle","horizon","dCost","dEff","startAge"].forEach(k=>{const el=document.getElementById(k);if(el)el.onchange=()=>m[k]=+el.value;});
@@ -690,7 +768,7 @@ function renderModelSidebar(){
   ["cvVal","cvKind","cvT","cvCyc"].forEach(id=>{const el=document.getElementById(id);if(el)el.oninput=convCalc;});convCalc();
   const w=document.getElementById("mwtp");w.oninput=()=>{m.wtp=+w.value;document.getElementById("mwtpLab").textContent=compactINR(+w.value);};
   document.querySelectorAll("#sidebar .wchip").forEach(b=>b.onclick=()=>{m.wtp=+b.dataset.mwtp;renderModelSidebar();renderModel();});
-  document.getElementById("runModel").onclick=renderModel;
+  document.getElementById("runModel").onclick=renderModel;wireGdp();
   wireExamples("model");
 }
 async function renderModel(){
@@ -702,12 +780,16 @@ async function renderModel(){
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
   const incRows=inc.map(s=>`<tr><td>${s.name}</td><td>${fmtINR(s.cost)}</td><td>${fmtNum(s.ly,3)}</td><td>${fmtNum(s.qaly,3)}</td><td>${fmtNum(s.daly,3)}</td><td>${s.incCost==null?"—":fmtINR(s.incCost)}</td><td>${s.incEff==null?"—":fmtNum(s.incEff,3)}</td><td>${s.icer==null?"—":fmtINR(s.icer)}</td><td style="text-align:left">${tagFor(s)}</td></tr>`).join("");
   const pts=R.plane,series=R.series;
-  ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, half-cycle correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.${m.bgMortality?` <b>Age-specific background mortality on</b> (from age ${m.startAge}).`:""}</div></div>${EXPORT_BAR}</div>
+  ws.innerHTML=`<div class="ws-head"><div><h2>Decision-analytic modeling</h2><div class="sub">Configurable ${m.states.length}-state Markov, ${m.strategies.length} strategies, ${R.correction==="simpson"?"Simpson's 1/3":"half-cycle"} correction, ${m.horizon}-yr horizon, ${pct(m.dCost,0)} discounting. Outcome: ${m.outcome==="QALY"?"QALYs":"DALYs"}.${m.bgMortality?` <b>Age-specific background mortality on</b> (from age ${m.startAge}).`:""}</div></div>${EXPORT_BAR}</div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">Optimal at WTP</div><div class="k-val sm">${best.name}</div><div class="k-sub">at ${compactINR(m.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">Its ICER</div><div class="k-val mono">${best.icer==null?"ref":fmtINR(best.icer)}</div><div class="k-sub">per ${unit}</div></div><div class="kpi emerald"><div class="k-label">Strategies</div><div class="k-val mono">${m.strategies.length}</div><div class="k-sub">${R.onFr} on frontier</div></div></div>
-    <div class="result-tabs" id="mTabs"><button class="result-tab active" data-p="trace">Cohort trace</button><button class="result-tab" data-p="ce">CE plane</button><button class="result-tab" data-p="inc">Incremental</button></div>
+    <div class="result-tabs" id="mTabs"><button class="result-tab active" data-p="trace">Cohort trace</button><button class="result-tab" data-p="ce">CE plane</button><button class="result-tab" data-p="inc">Incremental</button><button class="result-tab" data-p="det">Breakdown</button></div>
     <div class="pane active" data-pane="trace"><div class="card flush"><div class="pad"><h3>Cohort trace — ${R.activeName}</h3><div class="card-sub">Share of the cohort in each state over time (switch strategy in the sidebar).</div>${lineChart(series,"Years",m.horizon)}</div><div class="legend">${m.states.map((s,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${s.name}</div>`).join("")}</div></div></div>
     <div class="pane" data-pane="ce"><div class="card flush"><div class="pad"><h3>Cost-effectiveness plane</h3><div class="card-sub">Each strategy vs the cheapest. ${lowerBetter?"X = DALYs averted (right is better).":"X = incremental QALYs."}</div>${cePlane(pts,m.wtp)}</div></div></div>
     <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Life-years</th><th>QALYs</th><th>DALYs</th><th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div><p class="note">ICER in ₹ per ${unit}. India thresholds: 1×GDP ≈ ${fmtINR(GDP_PC)}, 3×GDP ≈ ${fmtINR(GDP_PC*3)}.</p></div></div>`;
+  const sn=R.stateNames||m.states.map(x=>x.name);
+  const det=`<div class="pane" data-pane="det"><div class="card"><h3>Discounted results by health state</h3><div class="card-sub">Where each strategy's costs and QALYs come from.</div><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th>${sn.map(n=>`<th>${escHTML(n)} cost</th>`).join("")}${sn.map(n=>`<th>${escHTML(n)} QALYs</th>`).join("")}</tr></thead><tbody>${inc.map(r=>`<tr><td>${escHTML(r.name)}</td>${(r.costByState||[]).map(v=>`<td>${fmtINR(v)}</td>`).join("")}${(r.qalyByState||[]).map(v=>`<td>${fmtNum(v,3)}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
+    <div class="card"><h3>Undiscounted totals</h3><div class="card-sub">CHEERS 2022 asks for both discounted and undiscounted results.</div><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Life-years</th><th>QALYs</th><th>Discounted cost</th><th>Discounted LYs</th><th>Discounted QALYs</th></tr></thead><tbody>${inc.map(r=>`<tr><td>${escHTML(r.name)}</td><td>${fmtINR(r.undisc?r.undisc.cost:0)}</td><td>${fmtNum(r.undisc?r.undisc.ly:0,3)}</td><td>${fmtNum(r.undisc?r.undisc.qaly:0,3)}</td><td>${fmtINR(r.cost)}</td><td>${fmtNum(r.ly,3)}</td><td>${fmtNum(r.qaly,3)}</td></tr>`).join("")}</tbody></table></div></div></div>`;
+  ws.querySelector('[data-pane="inc"]').insertAdjacentHTML("afterend",det);
   wireTabs("mTabs");wireExports("Artha Markov Model");addInterp(R);
 }
 
@@ -749,6 +831,7 @@ function renderSensSidebar(){
     m.strategies.forEach((st, i) => {
       const pst = s.params.strategies[i];
       if (pst.addCost) rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} added</span></td><td>${distSel(`strategies|${i}|addCost`, pst.addCost.dist, ["gamma","normal","fixed"])}</td><td><input type="number" data-pkey="strategies|${i}|addCost" data-field="mean" value="${pst.addCost.mean}"></td><td><input type="number" data-pkey="strategies|${i}|addCost" data-field="se" value="${pst.addCost.se||0}"></td></tr>`;
+      if (st.effect) { rows += `<tr><td colspan="4"><span style="font-size:10px">${escHTML(st.name.slice(0,14))}: transitions from the sampled baseline × effect ${(st.effect.measure||"hr").toUpperCase()} (lognormal from its 95% CI${st.effect.lo!==""&&st.effect.lo!=null?"":" — no CI given, so fixed"})</span></td></tr>`; return; }
       pst.matrix.forEach((mr, rIdx) => {
         rows += `<tr><td><span style="font-size:10px">${st.name.slice(0,10)} Tr(from ${m.states[rIdx].name.slice(0,4)})</span></td><td>${distSel(`strategies|${i}|matrix|${rIdx}`, mr.dist, ["dirichlet","fixed"])}</td><td>Sum <i>N</i>:</td><td><input type="number" data-pkey="strategies|${i}|matrix|${rIdx}" data-field="K" value="${mr.K||100}"></td></tr>`;
       });
@@ -763,7 +846,8 @@ function renderSensSidebar(){
     ${s.mode === "global" ? `<div class="field"><label>Assumed parameter uncertainty (CV) <span class="lab-val" id="cvLab">${pct(s.cv,0)}</span></label><input type="range" id="psaCV" min="0.05" max="0.5" step="0.05" value="${s.cv}"></div>` : gridHtml}
     <div class="field"><label>Random seed (same seed = same results)</label><input type="number" id="psaSeed" value="${s.seed==null?20251121:s.seed}"></div>
     <div class="field"><label>PSA iterations <span class="lab-val" id="nLab">${s.N}</span></label><input type="range" id="psaN" min="200" max="3000" step="100" value="${s.N}"></div>
-    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="1000000" step="25000" value="${s.wtp}"></div>
+    <div class="field"><label>WTP per ${m.outcome==="QALY"?"QALY":"DALY averted"} <span class="lab-val" id="swtpLab">${compactINR(s.wtp)}</span></label><input type="range" id="swtp" min="0" max="${wtpMax()}" step="25000" value="${s.wtp}"></div>
+    ${gdpField()}
     <div class="divider"></div><button class="btn btn-primary btn-block" id="runSens">Run analysis</button>`;
 
   document.getElementById("sRef").value=Math.min(s.ref,m.strategies.length-1);
@@ -787,7 +871,7 @@ function renderSensSidebar(){
       };
     });
   }
-  document.getElementById("runSens").onclick=renderSens;
+  document.getElementById("runSens").onclick=renderSens;wireGdp();
 }
 async function renderSens(){
   const s=state.sens,m=state.model,ws=document.getElementById("workspace");
@@ -795,13 +879,13 @@ async function renderSens(){
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">Running ${s.N} Monte-Carlo iterations on the server…</div></div></div>`;
   let R;try{R=await api("sensitivity",{model:m,N:s.N,wtp:s.wtp,ref:s.ref,cmp:s.cmp,cv:s.cv,mode:s.mode,params:s.params,seed:s.seed});}catch(e){return wsError(e);}
   const unit=R.unit;
-  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)} — Gamma costs, Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept).`;
+  const desc = s.mode === "per_parameter" ? "<b>Custom</b> per-parameter distributions." : `<b>Assumed</b> uncertainty at CV ${pct(R.cv,0)}: Gamma costs (state and treatment), Beta utilities, Dirichlet transitions (common random numbers across strategies; structural zeros kept); treatment effects lognormal from their 95% CI.`;
   ws.innerHTML=`<div class="ws-head"><div><h2>Sensitivity analysis</h2><div class="sub">${R.N} PSA iterations: <b>${R.cmpName}</b> vs <b>${R.refName}</b> (outcome ${m.outcome}). ${desc}</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">P(cost-effective)</div><div class="k-val mono">${pct(R.pCE)}</div><div class="k-sub">at ${compactINR(R.wtp)}/${unit}</div></div><div class="kpi gold"><div class="k-label">EVPI / patient</div><div class="k-val mono">${compactINR(R.evpi)}</div><div class="k-sub">value of removing uncertainty</div></div><div class="kpi"><div class="k-label">Iterations</div><div class="k-val mono">${R.N}</div><div class="k-sub">seed ${R.seed}</div></div></div>
       <div class="result-tabs" id="sTabs"><button class="result-tab active" data-p="ceac">CEAC</button><button class="result-tab" data-p="scatter">PSA scatter</button><button class="result-tab" data-p="tor">Tornado (DSA)</button></div>
       <div class="pane active" data-pane="ceac"><div class="card flush"><div class="pad"><h3>Cost-effectiveness acceptability curve</h3><div class="card-sub">Probability the new treatment is cost-effective across WTP thresholds.</div>${ceacChart(R.ceac)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.primary}"></span>P(new cost-effective)</div><div class="item"><span class="sw" style="background:${C.gold};height:3px;width:18px"></span>1× / 3× GDP</div></div></div></div>
       <div class="pane" data-pane="scatter"><div class="card flush"><div class="pad"><h3>PSA on the CE plane</h3><div class="card-sub">Each point = one Monte-Carlo draw. Purple = cost-effective at current WTP.</div>${scatterPSA(R.draws,R.wtp)}</div></div></div>
-      <div class="pane" data-pane="tor"><div class="card flush"><div class="pad"><h3>One-way sensitivity — tornado</h3><div class="card-sub">Swing in net monetary benefit as each parameter moves to its low/high value.</div>${tornado(R.tornado)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.amber}"></span>Low value</div><div class="item"><span class="sw" style="background:${C.primary}"></span>High value</div></div></div></div>`;
+      <div class="pane" data-pane="tor"><div class="card flush"><div class="pad"><h3>One-way sensitivity — tornado</h3><div class="card-sub">Net monetary benefit as each parameter moves to the low (amber) and high (purple) end of its range. Ranges come from your per-parameter distributions (95% interval), each treatment effect's 95% CI and 0–5% discounting; others are an assumed ±30% (costs) or ±0.1 (utilities), as labelled.</div>${tornado(R.tornado)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.amber}"></span>Low value</div><div class="item"><span class="sw" style="background:${C.primary}"></span>High value</div></div></div></div>`;
   wireTabs("sTabs");wireExports("Artha Sensitivity");
 }
 
@@ -842,9 +926,9 @@ async function renderBia(){
 /* ============================ PERSISTENCE ============================ */
 function saveLocal(){try{localStorage.setItem("arthaHE_v2",JSON.stringify(state));}catch(e){}}
 function deepMerge(target,src){if(src===null||src===undefined)return target;if(Array.isArray(target))return Array.isArray(src)?src:target;if(typeof target==="object"){if(typeof src!=="object"||Array.isArray(src))return target;for(const k in src){if(k in target&&target[k]&&typeof target[k]==="object"&&!Array.isArray(target[k])){deepMerge(target[k],src[k]);}else{target[k]=src[k];}}return target;}return src===undefined?target:src;}
-function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=scrub(JSON.parse(s));Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}}
+function loadLocal(){try{const s=localStorage.getItem("arthaHE_v2");if(s){const o=scrub(JSON.parse(s));Object.keys(o).forEach(k=>{if(k==="module"||state[k]===undefined)return;if(state[k]&&typeof state[k]==="object"&&!Array.isArray(state[k])){deepMerge(state[k],o[k]);}else{state[k]=o[k];}});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};}}catch(e){}if(!state.settings)state.settings={gdp:GDP_DEFAULT};syncGdp();}
 function exportProject(){dl(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"artha_project_"+new Date().toISOString().slice(0,10)+".json");}
-function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=scrub(JSON.parse(rd.result));Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
+function importProject(file){const rd=new FileReader();rd.onload=()=>{try{const o=scrub(JSON.parse(rd.result));Object.keys(o).forEach(k=>{if(k!=="module"&&state[k]!==undefined)state[k]=o[k];});if(state.costing&&!state.costing.adv)state.costing.adv={discount:0.03,monthlyHours:160,output:1,staff:[],equip:[],consum:[],space:[]};if(!state.settings)state.settings={gdp:GDP_DEFAULT};syncGdp();saveLocal();enterApp(o.module&&o.module!=="home"&&o.module!=="methods"?o.module:"costing");}catch(e){alert("That doesn't look like a valid Artha HE project file.");}};rd.readAsText(file);}
 
 /* ============================ GLOSSARY ============================ */
 const GLOSSARY={
@@ -877,8 +961,8 @@ async function renderMethods(){
   const glos=Object.keys(GLOSSARY).map(k=>`<dt>${k}</dt><dd>${GLOSSARY[k]}</dd>`).join("");
   const limitations=[
     ["Costing","Advanced costing covers salary apportioning, capital annualisation and space. Inflation uses a single constant rate (not a CPI series), and there is no PPP / currency conversion yet."],
-    ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles (though optional age-specific background mortality and a rate→probability / cycle-length helper are now provided). Tunnel states and fully time-varying disease transitions are not yet supported — use care for long horizons."],
-    ["PSA uncertainty","In Global mode, distributions (Gamma / Beta / Dirichlet) use one coefficient of variation you choose; use Per-Parameter mode to set them from your data. Each strategy's transition rows are sampled with common random numbers, which keeps the arms correlated. They are not yet derived from a sampled treatment effect (RR / HR) applied to a baseline matrix."],
+    ["Markov transitions are otherwise time-homogeneous","Disease-specific transition probabilities are constant over cycles. Age-specific background mortality from your own life table and a rate→probability helper are provided. Tunnel states and fully time-varying disease transitions are not yet supported, so take care with long horizons. Partitioned-survival and decision-tree models are not yet available."],
+    ["PSA uncertainty","In Global mode, distributions (Gamma / Beta / Dirichlet) use one coefficient of variation you choose; use Per-Parameter mode to set them from your data. Each strategy's transition rows are sampled with common random numbers, which keeps the arms correlated. Strategies defined by a treatment effect (HR / RR / OR) are rebuilt from the sampled baseline in every draw, with the effect drawn from its 95% CI. Strategy-specific utility overrides are not sampled."],
     ["DALYs are approximate","YLL uses one life-expectancy value rather than the GBD reference life table; age-weighting/discounting choices are not exposed."],
     ["Reference data is indicative","Unit costs, disability weights and life tables are starting values — confirm each from its cited official source before formal use."]
   ];
@@ -895,8 +979,7 @@ async function renderMethods(){
 
     <div class="card" style="border-left:4px solid var(--emerald)">
       <h3>How the engine is validated</h3>
-      <div class="card-sub">The R engine (<code>engine.R</code>) is open source and covered by an automated test suite (<code>tests/testthat</code>, run on every push). The suite checks: Markov results against closed-form answers; the DARTH Sick-Sicker model parameters (Alarid-Escudero et al., <i>Med Decis Making</i> 2023) against a separately written reference implementation; strong and extended dominance on worked examples; PSA reproducibility, absorbing states and correlated sampling; and the costing, out-of-pocket and budget-impact formulae. This confirms that the engine computes what it intends to. It does <b>not</b> confirm that your inputs or model structure suit your question.</div>
-      <p class="note">The engine does not yet reproduce the published DARTH result tables exactly. Those use Simpson's 1/3 within-cycle correction and treatment costs and utilities that apply to specific states only, which Artha HE does not support yet. Artha uses the trapezoidal (half-cycle) rule, and a strategy's added cost applies to every non-absorbing state.</p></div>
+      <div class="card-sub">The R engine (<code>engine.R</code>) is open source and covered by an automated test suite (<code>tests/testthat</code>, run on every push). It <b>reproduces the published DARTH Sick-Sicker base case</b> (Alarid-Escudero et al., <i>Med Decis Making</i> 2023; corrected results in DARTH v0.3.0). That means all four strategies, to the dollar on costs and to two decimals on QALYs, with the same ICERs ($73,279 and $125,302) and Strategy A dominated. Load <b>DARTH (validation)</b> in the Modeling tab to see it. The suite also checks Markov results against closed-form answers, Simpson weights against exact integrals, the hazard-ratio / relative-risk / odds-ratio effects, strong and extended dominance, PSA reproducibility and correlation, and the costing, out-of-pocket and budget-impact formulae. This confirms the engine computes what it intends to. It does <b>not</b> confirm that your inputs or model structure suit your question.</div></div>
 
     <div class="card" style="border-left:3px solid ${allok?'var(--emerald)':'var(--red)'}">
       <h3>Engine self-checks ${allok?'<span class="tag frontier">all passed</span>':'<span class="tag dominated">check failed</span>'}</h3>

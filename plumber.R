@@ -2,6 +2,7 @@
 library(plumber)
 library(jsonlite)
 source("engine.R")
+source("validation/darth_fixture.R")
 
 # Indian digit grouping: 12,34,567
 fmtINR <- function(x) {
@@ -181,7 +182,7 @@ function(req) {
     "These are deterministic (point-estimate) results - run the Sensitivity tab (PSA) to see how parameter uncertainty changes the probability of cost-effectiveness."
   )
   
-  list(rows=inc, plane=plane, best=best, unit=unit, onFr=length(onFr), strategies=length(m$strategies), states=length(m$states), activeName=as_strat$name, series=series, stateNames=sapply(m$states, function(s) s$name), wtp=wtp, horizon=as.numeric(m$horizon), dCost=as.numeric(m$dCost), outcome=m$outcome, interpretation=interp)
+  list(rows=inc, plane=plane, best=best, unit=unit, onFr=length(onFr), strategies=length(m$strategies), states=length(m$states), activeName=as_strat$name, series=series, stateNames=sapply(m$states, function(s) s$name), wtp=wtp, correction=fixed$correction, horizon=as.numeric(m$horizon), dCost=as.numeric(m$dCost), outcome=m$outcome, interpretation=interp)
 }
 
 #* @serializer unboxedJSON
@@ -200,7 +201,7 @@ function(req) {
   curve <- ceac(draws, seq(0, hiW, length.out = 41))
   pCE <- mean(vapply(draws, function(x) nmb(x$incCost, x$incEff, wtp) > 0, logical(1)))
   ev <- evpi(draws, wtp)
-  tor <- dsaModel(p$model, wtp, iRef, iCmp)
+  tor <- dsaModel(p$model, wtp, iRef, iCmp, if (identical(p[["mode"]], "per_parameter")) p[["params"]] else NULL)
 
   list(pCE = pCE, evpi = ev, ceac = curve, draws = draws, tornado = tor, N = N, wtp = wtp, cv = cv, seed = seed, unit = if(identical(p$model$outcome, "DALY")) "DALY averted" else "QALY", refName = p$model$strategies[[iRef+1]]$name, cmpName = p$model$strategies[[iCmp+1]]$name)
 }
@@ -254,7 +255,7 @@ function(req) {
   res <- lapply(res, function(s){ s$eff <- if(isQ) s$qaly else s$daly; s })
   minc <- modelIncremental(res, !isQ)
   unit <- if(isQ) "QALY" else "DALY averted"
-  modelSec <- paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>", tbl(c("Strategy","Cost","Life-years","QALYs","DALYs","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$ly,3), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
+  modelSec <- paste0("<p>", length(m$states), "-state Markov, ", length(m$strategies), " strategies, ", esc(m$horizon), "-year horizon, ", pct(num(m$dCost),0), " discounting, ", if (identical(m$correction, "simpson")) "Simpson's 1/3" else "half-cycle", " within-cycle correction. Outcome: ", if (isQ) "QALY" else "DALY", ".</p>", tbl(c("Strategy","Cost","Life-years","QALYs","DALYs","ICER","Status"), lapply(minc, function(s) c(s$name, fmtINR(s$cost), fmtNum(s$ly,3), fmtNum(s$qaly,3), fmtNum(s$daly,3), if(is.na(s$icer)) "-" else fmtINR(s$icer), s$status))))
   # 5 PSA
   if (length(m$strategies) >= 2) {
     pr <- tryCatch(pick_pair(st$sens$ref, st$sens$cmp, length(m$strategies)), error = function(e) c(0L, 1L))
@@ -329,9 +330,15 @@ function(req) {
   two <- list(states = list(list(name="Alive", cost=1000, util=1), list(name="Dead", cost=0, util=0, absorbing=TRUE)),
               strategies = list(list(name="x", addCost=0, matrix=list(list(0.9, 0.1), list(0, 1)))),
               cycle=1, horizon=10, dCost=0.03, dEff=0.03, lifeExp=0, outcome="QALY")
-  rr <- 0.9/1.03; qExp <- 0.95 * (1 - rr^10) / (1 - rr)
+  rr <- 0.9/1.03; qExp <- (1 - rr^11) / (1 - rr) - 0.5 * (1 + rr^10)
   q2 <- modelRunAll(two)[[1]]$qaly
   v[[length(v)+1]] <- list(n = "Markov QALYs = closed-form geometric series (half-cycle, 3%)", got = fmtNum(q2, 6), exp = fmtNum(qExp, 6), ok = abs(q2 - qExp) < 1e-9)
+
+  # Published DARTH Sick-Sicker base case (Simpson's 1/3, state-specific treatment costs/utilities).
+  dr <- modelRunAll(darth_model())
+  okD <- all(vapply(1:4, function(k) abs(dr[[k]]$cost - darth_published$cost[[k]]) < 1 && round(dr[[k]]$qaly, 2) == darth_published$qaly[[k]], logical(1)))
+  icB <- (dr[[3]]$cost - dr[[1]]$cost) / (dr[[3]]$qaly - dr[[1]]$qaly)
+  v[[length(v)+1]] <- list(n = "DARTH Sick-Sicker: published costs, QALYs and ICER (4 strategies)", got = paste0("ICER B $", formatC(icB, format = "f", big.mark = ",", digits = 0)), exp = "ICER B $73,279", ok = okD && abs(icB - darth_published$icer[["B"]]) < 1)
 
   # PSA keeps absorbing states absorbing (no resurrection from Dead).
   set.seed(1); dr <- psaDraw(fixModel(two), 0.3, "global", NULL)$strategies[[1]]$matrix

@@ -1,4 +1,6 @@
 library(plumber)
+# Text in the engine (₹, ±, –) is UTF-8; make sure R reads and serialises it as such.
+if (!l10n_info()$`UTF-8`) invisible(Sys.setlocale("LC_CTYPE", "C.UTF-8"))
 
 options_plumber(maxRequestSize = 2 * 1024 * 1024)  # 2 MB per request
 pr <- pr("plumber.R")
