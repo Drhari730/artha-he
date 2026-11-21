@@ -129,7 +129,8 @@ function flowChecks(){
     if(full&&(+m.dCost!==0.03||+m.dEff!==0.03))warn(`The model discounts at ${pct(m.dCost,0)} / ${pct(m.dEff,0)}; the reference case uses 3%.`,"modeling");
     const w=full?+m.wtp:+e.wtp;if(w&&Math.abs(w-GDP_PC)>1)info(`The threshold in use (${compactINR(w)}) differs from 1× GDP per capita (${compactINR(GDP_PC)}). Fine as a scenario; report it.`,full?"modeling":"evaluation");
   }
-  if(GDP_PC===GDP_DEFAULT)info("GDP per capita is still the default ₹2,00,000. Enter the latest MoSPI figure in the Evaluation, Modeling or Sensitivity tab.",full?"modeling":"evaluation");
+  const lg=state.refLib&&state.refLib.gdp;
+  if(!(lg&&lg.verified&&+lg.value===GDP_PC))info(`The GDP per capita behind the threshold (${compactINR(GDP_PC)}) is not the verified figure in your Reference library${lg&&lg.verified?` (${compactINR(+lg.value)}, ${escHTML(lg.year)})`:""}.`,"reference");
   if(!full&&(e.strats||[]).length===1)warn("Only one option in the Evaluation tab: add the comparator.","evaluation");
   if(full&&m.type==="psm"&&m.strategies.some(s=>s.os&&s.os.src==="manual"))info("A survival curve was entered by hand: cite its source, and note that its parameter uncertainty is not sampled in PSA (curves fitted in the Survival tab are).","modeling");
   if(full&&m.type==="tree"&&m.strategies.some(s=>s.nodes.length<2))warn("A decision-tree strategy has no branches yet.","modeling");

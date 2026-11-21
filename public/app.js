@@ -6,7 +6,7 @@
    Standard published HE methods, covered by tests/testthat.
    ============================================================================= */
 
-const RUPEE="₹", GDP_DEFAULT=200000;
+const RUPEE="₹", GDP_DEFAULT=243803; // India per-capita GDP, FY 2025-26 (PE), current prices, 2022-23 base: RBI Handbook Table 1 (NSO)
 let GDP_PC=GDP_DEFAULT; // per-capita GDP used for the 1× / 3× threshold markers; editable (state.settings.gdp)
 const COST_CATEGORIES=["Direct medical","Direct non-medical","Indirect (productivity)"];
 const C={primary:"#5B4BD6",primaryL:"#7261F0",gold:"#C8971F",emerald:"#0E9E78",amber:"#DD9430",red:"#DC4B4B",ink:"#1A1733",muted:"#6E6A86",line:"#E5E3F0"};
@@ -1224,12 +1224,12 @@ function renderVb(){
    STARTING POINTS — users must confirm the current figure from the cited source. */
 const REFDATA={
   thresholds:[
-    {item:"GDP per capita, India",value:"≈ ₹2,00,000 (US$ ~2,500)",basis:"2023–24",source:"World Bank / MoSPI",url:"https://data.worldbank.org/indicator/NY.GDP.PCAP.CN?locations=IN"},
-    {item:"Cost-effectiveness threshold (1× GDP/capita)",value:"≈ ₹2,00,000 per QALY",basis:"WHO-CHOICE convention (illustrative)",source:"WHO-CHOICE",url:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis"},
-    {item:"Threshold (3× GDP/capita)",value:"≈ ₹6,00,000 per QALY",basis:"upper illustrative bound",source:"WHO-CHOICE",url:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis"},
-    {item:"Discount rate (costs & health)",value:"3% per year",basis:"India HTA Reference Case",source:"DHR / HTAIn (2018)",url:"https://htain.icmr.org.in"},
-    {item:"Analytic perspective",value:"Health-system / societal",basis:"state the chosen perspective",source:"India HTA Reference Case",url:"https://htain.icmr.org.in"},
-    {item:"Medical inflation (CPI)",value:"≈ 5% per year",basis:"indicative",source:"MoSPI CPI",url:"https://www.mospi.gov.in"}
+    {item:"GDP per capita, India (FY 2025-26, provisional)",value:"₹2,43,803",basis:"Current prices, new 2022-23 base series. Earlier years: 2022-23 ₹1,88,862; 2023-24 ₹2,07,699; 2024-25 (FRE) ₹2,25,896. Do not mix with the 2011-12 base series.",source:"RBI Handbook, Table 1 (NSO)",url:"https://www.rbi.org.in/Scripts/AnnualPublications.aspx?head=Handbook+of+Statistics+on+Indian+Economy"},
+    {item:"Per capita NNI, India (FY 2025-26, provisional)",value:"₹2,08,090",basis:"Current prices, 2022-23 base",source:"RBI Handbook, Table 1 (NSO)",url:"https://www.rbi.org.in/Scripts/AnnualPublications.aspx?head=Handbook+of+Statistics+on+Indian+Economy"},
+    {item:"Cost-effectiveness threshold (1× GDP per capita)",value:"₹2,43,803 per QALY",basis:"FY 2025-26 GDP per capita",source:"HTAIn / WHO-CHOICE convention",url:"https://htain.icmr.org.in"},
+    {item:"Discount rate (costs & health)",value:"3% per year",basis:"India HTA reference case; test 0% and 5%",source:"DHR / HTAIn",url:"https://htain.icmr.org.in"},
+    {item:"Price index for cost inflation",value:"CPI-IW (2016 = 100)",basis:"One continuous series; MoSPI's general CPI moved to a 2024 = 100 base in Feb 2026, breaking the long-run CPI Health series. Link to the 2001 series with factor 2.88.",source:"Labour Bureau; RBI Handbook Table 37",url:"https://labourbureau.gov.in"},
+    {item:"CGHS package-rate adjustments",value:"Base rate ±",basis:"Non-NABH/NABL −15%; super-speciality +15%; Tier-III cities −20%; general ward −5%; private ward +5% (semi-private is the base). Consultations CN001/CN002 ₹350 at every hospital type.",source:"CGHS O.M. 03.10.2025 (effective 13.10.2025)",url:"https://cghs.mohfw.gov.in"}
   ],
   unitCosts:[
     {item:"Outpatient consultation (public, secondary)",value:300,unit:"per visit",category:"Direct medical"},

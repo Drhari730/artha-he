@@ -404,9 +404,23 @@ fixModel <- function(m) {
 # list(list(age=, q=), ...) from an official source (e.g. SRS abridged life
 # tables for India, or WHO GHO life tables) for formal analyses.
 BG_MORT_DEFAULT <- matrix(c(0,0.028, 1,0.003, 5,0.001, 15,0.0015, 25,0.002, 35,0.003, 45,0.006, 55,0.013, 65,0.030, 75,0.070, 85,0.15), ncol = 2, byrow = TRUE)
+# Convert an abridged life table (SRS format: age, n, nqx, lx, nLx) to annual
+# death probabilities: q = 1 - (1 - nqx)^(1/n) for each closed interval
+# (constant hazard within it); for the open last interval the hazard is the
+# life-table death rate m = lx / nLx, so q = 1 - exp(-m).
+abridged_to_annual <- function(rows) {
+  lapply(rows, function(r) {
+    n <- num(r$n, NA); nq <- num(r$nqx, NA)
+    q <- if (!is.na(n) && n > 0 && !is.na(nq)) 1 - (1 - nq)^(1 / n)
+         else { lx <- num(r$lx, NA); L <- num(r$nLx, NA); if (is.na(lx) || is.na(L) || L <= 0) NA_real_ else 1 - exp(-lx / L) }
+    list(age = num(r$age, NA), q = q)
+  })
+}
+
 lifeTableOf <- function(m) {
   lt <- m$lifeTable
   if (is.null(lt) || length(lt) == 0) return(BG_MORT_DEFAULT)
+  if (!is.null(lt[[1]]$nqx) || !is.null(lt[[1]]$lx)) lt <- abridged_to_annual(lt)
   M <- t(vapply(lt, function(r) c(num(r$age, NA), num(r$q, NA)), numeric(2)))
   if (any(is.na(M))) input_error("Every life-table row needs a numeric age and annual death probability (q).")
   if (any(M[, 2] < 0 | M[, 2] > 1)) input_error("Life-table death probabilities (q) must be between 0 and 1.")
@@ -466,7 +480,8 @@ markovGeneric <- function(m, strat) {
   absIdx <- which(!alive)
   useBg <- isTRUE(as.logical(m$bgMortality)) && length(absIdx) > 0
   lt <- if (useBg) lifeTableOf(m) else NULL
-  startAge <- if (num(m$startAge) > 0) num(m$startAge) else 30
+  startAge <- num(m$startAge, 30)   # 0 is a valid start age (a birth cohort)
+  if (startAge < 0) input_error("The cohort start age cannot be negative.")
 
   trace <- matrix(0, nrow = nC + 1, ncol = n)
   trace[1, 1] <- 1

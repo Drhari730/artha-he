@@ -9,20 +9,52 @@
    ============================================================================= */
 
 /* ------------------------------ library ---------------------------------- */
+// Library version 2: official India figures supplied and checked by the user
+// (21 Nov 2026) with their sources. Values without a confirmed price year stay
+// "not verified" until it is added.
+const LIB_VERSION=2, LIB_CHECKED="2026-11-21";
+const OFFICIAL_LIB={
+  gdp:{value:243803,year:"FY 2025-26 (PE)",source:"RBI Handbook of Statistics on Indian Economy, Table 1 (NSO); current prices, 2022-23 base",url:"https://www.rbi.org.in/Scripts/AnnualPublications.aspx?head=Handbook+of+Statistics+on+Indian+Economy",verified:true,verifiedOn:LIB_CHECKED,
+    series:[{fy:"2022-23",gdp:188862,nni:159557},{fy:"2023-24",gdp:207699,nni:176465},{fy:"2024-25 (FRE)",gdp:225896,nni:192774},{fy:"2025-26 (PE)",gdp:243803,nni:208090}]},
+  cpi:{rows:[{year:2020,index:118},{year:2021,index:124},{year:2022,index:131},{year:2023,index:138},{year:2024,index:143},{year:2025,index:147}],
+    source:"Labour Bureau CPI-IW (2016 = 100), financial-year averages; RBI Handbook Table 37",url:"https://labourbureau.gov.in",verified:true,verifiedOn:LIB_CHECKED,
+    note:"Year = first year of the financial year (2025 = FY 2025-26). Use the same convention for the price year of each cost. For years before 2020, link the 2001-base series with factor 2.88."},
+  unitCosts:[
+    {item:"OPD consultation (CGHS CN001)",value:350,unit:"per consultation",category:"Direct medical",year:2025,source:"CGHS rates, O.M. 03.10.2025 (effective 13.10.2025); same at non-NABH, NABH and super-speciality",verified:true},
+    {item:"Inpatient consultation (CGHS CN002)",value:350,unit:"per consultation",category:"Direct medical",year:2025,source:"CGHS rates, O.M. 03.10.2025 (effective 13.10.2025); same at non-NABH, NABH and super-speciality",verified:true},
+    {item:"Inpatient bed-day, district hospital (public, North India)",value:844,unit:"per bed-day",category:"Direct medical",year:"",source:"Prinja et al., district hospital unit costs (PMC5793470); add the study's price year",verified:false},
+    {item:"Surgical procedure, district hospital (public, North India)",value:3481,unit:"per procedure",category:"Direct medical",year:"",source:"Prinja et al., district hospital unit costs (PMC5793470); add the study's price year",verified:false},
+    {item:"Outpatient consultation, district hospital (public, North India)",value:170,unit:"per consultation",category:"Direct medical",year:"",source:"Prinja et al., district hospital unit costs (PMC5793470); add the study's price year",verified:false},
+    {item:"Outpatient consultation, community health centre",value:134,unit:"per consultation",category:"Direct medical",year:"",source:"CHC and district hospital unit costs across India (PMC7248147); add the study's price year",verified:false},
+    {item:"Institutional delivery, community health centre",value:3833,unit:"per delivery",category:"Direct medical",year:"",source:"CHC and district hospital unit costs across India (PMC7248147); add the study's price year",verified:false}
+  ]
+};
 function refLib(){
   if(!state.refLib){
-    const t=REFDATA.thresholds;
-    state.refLib={
-      gdp:{value:GDP_DEFAULT,year:"2023–24",source:"MoSPI / World Bank",url:"https://www.mospi.gov.in",verified:false,verifiedOn:""},
-      cpi:{rows:[],source:"Labour Bureau CPI-IW / MoSPI CPI (Health)",url:"https://labourbureau.gov.in",verified:false,verifiedOn:""},
-      lifeTables:[],
-      unitCosts:REFDATA.unitCosts.map(u=>Object.assign({},u,{source:REFDATA.unitCostSource.name,year:2024,verified:false})),
-      utilities:REFDATA.weights.map(w=>({state:w.state,util:w.util,dw:w.dw,source:w.basis,verified:false})),
-      notes:t.map(r=>({item:r.item,value:r.value,basis:r.basis,source:r.source,url:r.url}))
-    };
+    state.refLib={version:LIB_VERSION,gdp:JSON.parse(JSON.stringify(OFFICIAL_LIB.gdp)),cpi:JSON.parse(JSON.stringify(OFFICIAL_LIB.cpi)),lifeTables:[],
+      unitCosts:JSON.parse(JSON.stringify(OFFICIAL_LIB.unitCosts)).concat(REFDATA.unitCosts.filter(u=>!/consultation|bed-day \(public, general/i.test(u.item)).map(u=>Object.assign({},u,{source:"Indicative: replace with the CGHS rate",year:2024,verified:false}))),
+      utilities:REFDATA.weights.map(w=>({state:w.state,util:w.util,dw:w.dw,source:w.basis,verified:false})),notes:REFDATA.thresholds};
   }
-  return state.refLib;
+  const L=state.refLib;
+  if(!(L.version>=LIB_VERSION)){ // upgrade an older saved library without overwriting the user's verified edits
+    if(!(L.gdp&&L.gdp.verified))L.gdp=JSON.parse(JSON.stringify(OFFICIAL_LIB.gdp));
+    if(!(L.cpi&&L.cpi.verified&&L.cpi.rows.length))L.cpi=JSON.parse(JSON.stringify(OFFICIAL_LIB.cpi));
+    const have=new Set(L.unitCosts.map(u=>u.item));L.unitCosts=OFFICIAL_LIB.unitCosts.filter(u=>!have.has(u.item)).map(u=>Object.assign({},u)).concat(L.unitCosts);
+    L.notes=REFDATA.thresholds;L.version=LIB_VERSION;
+  }
+  if(!L.srsSeeded&&SRS.data){if(!L.lifeTables.some(t=>t.srs))["Total","Male","Female"].forEach(sx=>L.lifeTables.push(srsEntry("India","Total",sx)));L.srsSeeded=true;}
+  return L;
 }
+/* SRS abridged life tables 2020-24 (ORGI), parsed from the official PDF. */
+const SRS={data:null,loading:null};
+function loadSRS(){if(SRS.data)return Promise.resolve(SRS.data);if(!SRS.loading)SRS.loading=fetch("data/srs_life_tables_2020_24.json").then(r=>r.json()).then(d=>{SRS.data=d;return d;}).catch(()=>null);return SRS.loading;}
+function srsEntry(region,res,sex){const rows=SRS.data.regions[region][res][sex];
+  return {name:`SRS 2020-24 · ${region} · ${res==="Total"?"all areas":res.toLowerCase()} · ${sex==="Total"?"persons":sex.toLowerCase()}`,srs:{region,res,sex},rows,abridged:true,
+    source:"ORGI, SRS Based Abridged Life Tables 2020-24 (May 2026)",verified:true,verifiedOn:LIB_CHECKED,e0:rows[0].ex};}
+// Annual probability of death from an abridged row (same formula as the engine's abridged_to_annual).
+function annualQ(r){return r.n?1-Math.pow(1-r.nqx,1/r.n):1-Math.exp(-r.lx/r.nLx);}
+function exAt(rows,age){let e=rows[0].ex;rows.forEach(r=>{if(r.age<=age)e=r.ex;});return e;}
+loadSRS();
 const vBadge=(v,on)=>v?`<span class="tag frontier">Verified${on?" "+escHTML(on):""}</span>`:`<span class="tag ext">Indicative: verify</span>`;
 function noteRefUse(item,value,source,verified){
   state.refUsedMap=state.refUsedMap||{};
@@ -35,7 +67,7 @@ function renderReference(){
   const L=refLib(),ws=document.getElementById("workspace");
   const verRow=(key)=>`<label style="display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;margin:0"><input type="checkbox" data-ver="${key}" ${(key==="gdp"?L.gdp:L.cpi).verified?"checked":""} style="width:auto">I have checked this against the source</label>`;
   const lt=L.lifeTables.map((t,i)=>`<div class="ex-row" style="border-style:solid"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between"><b>${escHTML(t.name)}</b> ${vBadge(t.verified,t.verifiedOn)}</div>
-      <div class="card-sub" style="margin:4px 0">${t.rows.length} age groups · ${escHTML(t.source||"source not given")}</div>
+      <div class="card-sub" style="margin:4px 0">${t.rows.length} age groups${t.abridged?` · life expectancy at birth ${t.e0} years · abridged table (interval probabilities converted to annual by the engine)`:""} · ${escHTML(t.source||"source not given")}</div>
       <div class="btn-row"><button class="btn btn-primary sm" data-ltuse="${i}">Use as background mortality in the Markov model</button><label style="display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;margin:0"><input type="checkbox" data-ltver="${i}" ${t.verified?"checked":""} style="width:auto">Verified</label><button class="btn btn-ghost sm" data-ltdel="${i}">Remove</button></div></div>`).join("");
   const uc=L.unitCosts.map((u,i)=>`<tr><td><input data-uc="item" data-i="${i}" value="${escHTML(u.item)}"></td><td><input data-uc="value" data-i="${i}" type="number" value="${u.value}" style="text-align:right"></td><td><input data-uc="unit" data-i="${i}" value="${escHTML(u.unit||"")}"></td><td><input data-uc="year" data-i="${i}" type="number" value="${u.year||""}" style="text-align:right;width:70px"></td><td><input data-uc="source" data-i="${i}" value="${escHTML(u.source||"")}"></td><td style="text-align:center"><input type="checkbox" data-ucver="${i}" ${u.verified?"checked":""}></td><td><button class="btn btn-ghost sm" data-ucuse="${i}" style="padding:4px 8px">Add to costing</button></td><td class="row-del" data-ucdel="${i}">&times;</td></tr>`).join("");
   const ut=L.utilities.map((u,i)=>`<tr><td><input data-ut="state" data-i="${i}" value="${escHTML(u.state)}"></td><td><input data-ut="util" data-i="${i}" type="number" step="0.01" value="${u.util}" style="text-align:right"></td><td><input data-ut="dw" data-i="${i}" type="number" step="0.01" value="${u.dw}" style="text-align:right"></td><td><input data-ut="source" data-i="${i}" value="${escHTML(u.source||"")}"></td><td style="text-align:center"><input type="checkbox" data-utver="${i}" ${u.verified?"checked":""}></td><td class="row-del" data-utdel="${i}">&times;</td></tr>`).join("");
@@ -48,14 +80,19 @@ function renderReference(){
       <div class="card"><h3>GDP per capita (threshold) ${vBadge(L.gdp.verified,L.gdp.verifiedOn)}</h3><div class="card-sub">Sets the 1× / 3× GDP-per-capita willingness-to-pay markers.</div>
         <div class="field two"><div><label>Value (₹)</label><input type="number" id="libGdp" value="${L.gdp.value}"></div><div><label>Year</label><input type="text" id="libGdpYr" value="${escHTML(L.gdp.year)}"></div></div>
         <div class="field"><label>Source</label><input type="text" id="libGdpSrc" value="${escHTML(L.gdp.source)}"></div>
+        ${L.gdp.series?`<div class="table-scroll"><table class="results-table" style="margin-bottom:8px"><thead><tr><th style="text-align:left">FY</th><th>GDP per capita</th><th>NNI per capita</th></tr></thead><tbody>${L.gdp.series.map(r=>`<tr><td style="text-align:left">${r.fy}</td><td>${fmtINR(r.gdp)}</td><td>${fmtINR(r.nni)}</td></tr>`).join("")}</tbody></table></div>`:""}
         <div class="btn-row">${verRow("gdp")}<button class="btn btn-primary sm" id="libGdpUse">Use as the threshold</button></div></div>
       <div class="card"><h3>Consumer price index ${vBadge(L.cpi.verified,L.cpi.verifiedOn)}</h3><div class="card-sub">Converts costs between price years by the index ratio (better than a flat inflation rate). One “year, index” per line.</div>
         <textarea id="libCpi" rows="5" style="font-family:var(--mono);font-size:11px" placeholder="2019, 100\n2020, 105.2\n…">${L.cpi.rows.map(r=>`${r.year}, ${r.index}`).join("\n")}</textarea>
+        ${L.cpi.note?`<p class="hint" style="margin-top:6px">${escHTML(L.cpi.note)}</p>`:""}
         <div class="field" style="margin-top:8px"><label>Source</label><input type="text" id="libCpiSrc" value="${escHTML(L.cpi.source)}"></div>
         <div class="btn-row">${verRow("cpi")}<button class="btn btn-primary sm" id="libCpiUse" ${L.cpi.rows.length<2?"disabled":""}>Use in costing</button></div></div>
     </div>
 
-    <div class="card"><h3>Life tables</h3><div class="card-sub">For age-specific background mortality. Paste an official table (e.g. SRS abridged life table for India, by sex): one “age, annual probability of death (q)” per line.</div>
+    <div class="card"><h3>SRS abridged life tables 2020-24 <span class="tag frontier">Official · ORGI</span></h3><div class="card-sub">India and 22 states/UTs, by residence and sex, parsed from the ORGI report (May 2026). Each table reproduces its published life expectancy in the model to within 0.3 years.</div>
+      ${SRS.data?`<div class="field two"><div><label>Region</label><select id="srsReg">${Object.keys(SRS.data.regions).map(r=>`<option ${r==="India"?"selected":""}>${r}</option>`).join("")}</select></div><div><label>Residence · sex</label><div style="display:flex;gap:6px"><select id="srsRes"><option value="Total">All areas</option><option>Rural</option><option>Urban</option></select><select id="srsSex"><option value="Total">Persons</option><option>Male</option><option>Female</option></select></div></div></div>
+      <div class="card-sub" id="srsPrev"></div><button class="btn btn-secondary sm" id="srsAdd">Add to my life tables</button>`:'<p class="hint">Loading the SRS tables…</p>'}</div>
+    <div class="card"><h3>My life tables</h3><div class="card-sub">Used for age-specific background mortality (and, for DALYs, the life expectancy at the cohort's start age). You can also paste your own: one “age, annual probability of death (q)” per line.</div>
       ${lt||'<p class="hint">No life tables yet.</p>'}
       <details class="ex-row" style="border-style:solid" ${L.lifeTables.length?"":"open"}><summary style="cursor:pointer;font-weight:600;font-size:12px">Add a life table</summary>
         <div class="field two" style="margin-top:8px"><div><label>Name</label><input type="text" id="ltName" placeholder="e.g. India SRS 2016–20, female"></div><div><label>Source</label><input type="text" id="ltSrc" placeholder="Office of the Registrar General, SRS"></div></div>
@@ -82,9 +119,16 @@ function renderReference(){
   document.getElementById("libCpiSrc").onchange=e=>{L.cpi.source=e.target.value;saveLocal();};
   document.getElementById("libCpiUse").onclick=()=>{state.costing.useCpi=true;noteRefUse("Consumer price index ("+L.cpi.rows.length+" years)",L.cpi.rows.map(r=>r.year).join(", "),L.cpi.source,L.cpi.verified);route("costing");};
   document.querySelectorAll("[data-ver]").forEach(el=>el.onchange=()=>{const o=el.dataset.ver==="gdp"?L.gdp:L.cpi;o.verified=el.checked;o.verifiedOn=el.checked?today():"";re();});
+  const sr=document.getElementById("srsReg");
+  if(sr){const prev=()=>{const t=SRS.data.regions[val("srsReg")][val("srsRes")][val("srsSex")];document.getElementById("srsPrev").innerHTML=`Life expectancy at birth <b>${t[0].ex}</b> years; at 60, <b>${t[13].ex}</b> years.`;};
+    ["srsReg","srsRes","srsSex"].forEach(id=>document.getElementById(id).onchange=prev);prev();
+    document.getElementById("srsAdd").onclick=()=>{const e=srsEntry(val("srsReg"),val("srsRes"),val("srsSex"));if(L.lifeTables.some(t=>t.name===e.name)){alert("That table is already in your library.");return;}L.lifeTables.push(e);re();};}
+  if(!SRS.data)loadSRS().then(()=>{if(state.module==="reference")renderReference();});
   document.getElementById("ltAdd").onclick=()=>{const rows=parseLifeTable(val("ltRows"));if(rows.length<2){alert("Paste at least two rows of “age, q”.");return;}if(rows.some(r=>r.q<0||r.q>1)){alert("q must be between 0 and 1 (an annual probability of death).");return;}
     L.lifeTables.push({name:val("ltName")||"Life table "+(L.lifeTables.length+1),source:val("ltSrc"),rows,verified:false,verifiedOn:""});re();};
-  document.querySelectorAll("[data-ltuse]").forEach(b=>b.onclick=()=>{const t=L.lifeTables[+b.dataset.ltuse],m=state.model;m.lifeTable=t.rows;m.lifeTableText=t.rows.map(r=>`${r.age}, ${r.q}`).join("\n");m.bgMortality=true;
+  document.querySelectorAll("[data-ltuse]").forEach(b=>b.onclick=()=>{const t=L.lifeTables[+b.dataset.ltuse],m=state.model;m.lifeTable=t.rows;
+    m.lifeTableText=t.rows.map(r=>`${r.age}, ${(t.abridged?annualQ(r):r.q).toFixed(6)}`).join("\n");m.bgMortality=true;
+    if(t.abridged&&m.outcome==="DALY")m.lifeExp=exAt(t.rows,+m.startAge||0);
     noteRefUse("Life table: "+t.name,t.rows.length+" age groups",t.source,t.verified);state.model.type="markov";route("modeling");});
   document.querySelectorAll("[data-ltver]").forEach(el=>el.onchange=()=>{const t=L.lifeTables[+el.dataset.ltver];t.verified=el.checked;t.verifiedOn=el.checked?today():"";re();});
   document.querySelectorAll("[data-ltdel]").forEach(el=>el.onclick=()=>{L.lifeTables.splice(+el.dataset.ltdel,1);re();});

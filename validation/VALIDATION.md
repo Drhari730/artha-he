@@ -18,6 +18,7 @@ The R engine (`engine.R`) is covered by an automated `testthat` suite (`tests/te
 | EVPPI | The regression estimator recovers analytic values: for INB = X + Y with X, Y ~ N(0,1), EVPPI(X) = 1/√(2π) and EVPPI(X, Y) = EVPI = 1/√π (within 3%); an irrelevant parameter gives ≈ 0; EVPPI never exceeds EVPI for Markov, PSM and tree models |
 | Costing (CPI) | Price-year conversion uses the index ratio when both years are in the CPI series and falls back to the annual rate otherwise |
 | Scenarios | The base case reproduces the DARTH ICER; standard scenarios change the result as expected; a failing scenario reports its own error without stopping the others |
+| SRS life tables | All 207 SRS 2020-24 tables (India and 22 states/UTs × residence × sex) parsed from the ORGI report pass l(x+n) = l(x)(1 - nqx); a cohort facing only background mortality reproduces each table's published life expectancy at birth and at 60 to within 0.06-0.28 years |
 | Treatment effects | HR, RR and OR give the expected probabilities; the residual moves to the diagonal; invalid effects and baselines are rejected |
 | Markov engine | The cohort sums to 1 in every cycle, with and without background mortality |
 | Markov engine | Invalid matrices (rows not summing to 1, probabilities outside 0–1, blank cells) are rejected with a clear message |
