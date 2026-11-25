@@ -36,6 +36,10 @@ Question → Costs → Outcomes → Evaluation (quick) or Model + Uncertainty (f
 - **Nothing typed twice:** every result (a cost, a QALY, a utility, a transition probability, a model's results) has a **Use this result** button that sends it to the step that needs it. Artha records where each value came from, and the report lists it.
 - **Submission-ready report:** includes only the analyses you ran, plus the decision problem, a model-inputs table, undiscounted results, the DSA table, where each input came from, and the CHEERS 2022 checklist.
 
+## Design
+
+Clinical, journal-grade interface: Newsreader for headings and figure titles, Inter for the interface, IBM Plex Mono for every number (columns line up); ink, teal and amber. A left workflow rail shows progress through the HTA steps. Results open with a plain-language verdict, scenario tabs (base case, standard scenarios, your saved scenarios) and a Checks panel; charts and tables are numbered "Figure n." / "Table n." with journal-style rules. Press Enter in any input to run. Motion (count-up numbers, drawn chart lines, staggered cards, landing-page reveals) switches off when the system asks for reduced motion.
+
 ## How it's built
 
 - **Front end:** plain HTML + CSS + JavaScript in `public/` (no framework). It handles input, charts and export.
@@ -86,7 +90,8 @@ plumber.R           # JSON API + report builder
 run.R               # starts the server (error handling, request-size limit)
 public/data/        # srs_life_tables_2020_24.json (parsed from the ORGI report)
 public/             # front end: index.html, app.js (core), models.js (survival, PSM, trees),
-                    #   library.js (reference library, scenarios), flow.js (guided flow, CHEERS)
+                    #   library.js (reference library, scenarios), flow.js (guided flow, CHEERS),
+                    #   ui.js (presentation: figures, motion, verdict, scenario tabs, checks)
 tests/              # testthat suite (tests/run_tests.R)
 validation/         # DARTH validation script + VALIDATION.md
 Dockerfile          # pinned R image; runs the tests at build time

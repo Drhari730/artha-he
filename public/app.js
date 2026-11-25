@@ -9,8 +9,9 @@
 const RUPEE="₹", GDP_DEFAULT=243803; // India per-capita GDP, FY 2025-26 (PE), current prices, 2022-23 base: RBI Handbook Table 1 (NSO)
 let GDP_PC=GDP_DEFAULT; // per-capita GDP used for the 1× / 3× threshold markers; editable (state.settings.gdp)
 const COST_CATEGORIES=["Direct medical","Direct non-medical","Indirect (productivity)"];
-const C={primary:"#5B4BD6",primaryL:"#7261F0",gold:"#C8971F",emerald:"#0E9E78",amber:"#DD9430",red:"#DC4B4B",ink:"#1A1733",muted:"#6E6A86",line:"#E5E3F0"};
-const SERIES=[C.primary,C.gold,C.emerald,C.amber,C.red,"#6E6A86"];
+const C={primary:"#0F172A",primaryL:"#334155",gold:"#B7832F",emerald:"#0F766E",amber:"#B45309",red:"#B91C1C",ink:"#0F172A",muted:"#475569",line:"#E3E7EC",teal:"#0F766E"};
+// Chart series: distinct in hue AND lightness so they stay apart for colour-blind readers.
+const SERIES=["#0F172A","#0F766E","#B45309","#2563EB","#BE185D","#64748B"];
 
 /* ---------- formatting ---------- */
 const fmtINR=(x,dp=0)=>RUPEE+Number(x).toLocaleString("en-IN",{minimumFractionDigits:dp,maximumFractionDigits:dp});
@@ -134,7 +135,7 @@ async function openReport(){
 
 /* ---------- SVG charts ---------- */
 function svgWrap(w,h,i){return`<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${i}</svg>`;}
-function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="${o.mono?"IBM Plex Mono":"Plus Jakarta Sans"}" font-weight="${o.weight||400}">${s}</text>`;}
+function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="${o.mono?"IBM Plex Mono":"Inter"}" font-weight="${o.weight||400}">${s}</text>`;}
 function barChartH(data){const W=660,rh=50,H=data.length*rh+28,padL=185,padR=120,max=Math.max(...data.map(d=>d.value),1),bw=W-padL-padR;let g="";
   data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"><title>${d.label}: ${d.tag}</title></rect>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
   return svgWrap(W,H,g);}
@@ -166,7 +167,7 @@ function lineChart(series,xlab,xmax,opts){const o=opts||{},tip=o.tip||((s,d)=>`$
 function ceacChart(curve){const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,xmax=curve[curve.length-1].wtp,X=v=>ox+(v/xmax)*pw,Y=v=>oy-v*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax){g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i+1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});}});
+  [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax){g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i?3:1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});}});
   g+=`<polyline points="${curve.map(c=>`${X(c.wtp)},${Y(c.prob)}`).join(" ")}" fill="none" stroke="${C.primary}" stroke-width="2.6"/>`;
   g+=txt(ox+pw/2,H-12,"Willingness-to-pay per QALY (₹)",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);}
 function tornado(rows){const W=680,rh=50,H=rows.length*rh+38,padL=230,mid=padL+(W-padL-40)/2,half=(W-padL-40)/2;
@@ -320,110 +321,102 @@ function wireExamples(mod){document.querySelectorAll("#sidebar .ex-row [data-ex]
 
 /* ============================ HOME ============================ */
 function renderLanding(){
-  const defs=[
-    {a:"Costing",cls:"ink",go:"costing",h:"Micro & gross costing",p:"Bottom-up (resource × unit cost) or top-down (budget ÷ output). The foundation of every evaluation."},
-    {a:"OOP / CHE",cls:"gold",go:"oop",h:"Out-of-pocket & catastrophic expenditure",p:"What patients pay directly, and whether it crosses catastrophic (10% income / 40% capacity-to-pay) thresholds."},
-    {a:"CMA",cls:"",go:"evaluation",h:"Cost-minimisation",p:"When outcomes are equal, compare cost only — cheapest option wins."},
-    {a:"CEA",cls:"",go:"evaluation",h:"Cost-effectiveness",p:"Cost per natural outcome (life-year, case averted). Reports the ICER vs the next best option."},
-    {a:"CUA",cls:"",go:"evaluation",h:"Cost-utility",p:"Cost per QALY — the HTA standard, capturing both quality and length of life."},
-    {a:"CBA",cls:"",go:"evaluation",h:"Cost-benefit",p:"Costs and outcomes both in money — net monetary benefit and benefit–cost ratio."},
-    {a:"Markov",cls:"em",go:"modeling",h:"Decision-analytic modeling",p:"State-transition (Markov) cohort models with half-cycle correction and discounting, in one click."},
-    {a:"PSA / DSA",cls:"em",go:"sensitivity",h:"Sensitivity analysis",p:"Tornado (one-way), probabilistic Monte-Carlo, CEAC and EVPI — how robust is the conclusion?"},
-    {a:"BIA",cls:"gold",go:"bia",h:"Budget impact analysis",p:"Affordability for the payer: annual and cumulative spend as a new treatment is adopted."},
-    {a:"ICER",cls:"ink",h:"Incremental cost-effectiveness ratio",p:"Δcost ÷ Δeffect between options, with strong and extended dominance detected automatically."}
-  ];
-  const guide=[
-    {t:"Micro-costing (bottom-up)",what:"Builds the cost of a service, programme or intervention from the ground up — every resource used, costed individually.",data:"For each resource: staff time + salary, consumables, equipment, space, quantity used, unit cost and price year. Staff are costed by salary × time-share; equipment is annualised over its useful life (+ maintenance).",how:["List every resource used","Enter quantity × unit cost (salary × time-share for staff; annualised cost for equipment)","Group by cost category","Express all costs in one price year"]},
-    {t:"Gross-costing (top-down)",what:"Divides a total budget by the number of output units — quick when only aggregate spend is known.",data:"Total expenditure of the cost centre, and the number of output units (patients treated, visits, tests, doses delivered).",how:["Take the total cost of the service","Count the output units produced","Cost per unit = total ÷ output"]},
-    {t:"Out-of-pocket & catastrophic expenditure",what:"What patients/households pay directly, and whether that payment is financially catastrophic.",data:"Direct medical (consultation, drugs, tests, hospitalisation), direct non-medical (transport, food, lodging), indirect (lost income); plus household income and non-food expenditure.",how:["Enter each payment by category","Add household income & capacity-to-pay","Compare OOP to thresholds (10%/25% income, 40% capacity-to-pay)"]},
-    {t:"Cost-effectiveness (CEA)",what:"Cost per unit of a single natural outcome — life-years gained, cases averted, mmHg reduced, children fully immunised.",data:"Total cost and the common natural-unit effect for each option being compared.",how:["Enter cost & effect per option","ICER = Δcost ÷ Δeffect vs the next best option","Compare the ICER to your threshold"]},
-    {t:"Cost-utility (CUA)",what:"Cost per QALY (or DALY averted) — captures both quality and length of life. The HTA standard.",data:"Total cost and QALYs (utility × time) for each option. DALYs may be used in LMIC/GBD work.",how:["Enter cost & QALYs per option","Compute the ICER per QALY","Compare to 1× / 3× GDP per capita"]},
-    {t:"Cost-benefit (CBA)",what:"Costs and outcomes both expressed in money — lets you compare across very different programmes.",data:"Total cost and a monetised benefit (₹) for each option (e.g. willingness-to-pay or productivity value).",how:["Enter cost & monetised benefit","Net benefit = benefit − cost","Benefit-cost ratio > 1 = worthwhile"]},
-    {t:"Decision modelling (Markov)",what:"Projects costs and outcomes over time across health states — for chronic disease, screening or long-run programmes.",data:"Health states, transition probabilities, state costs & utilities, time horizon and discount rate.",how:["Define the health states","Fill each strategy's transition matrix (rows sum to 1)","Run the cohort → read the ICER and trace"]},
-    {t:"Sensitivity analysis (DSA / PSA)",what:"Tests how robust the conclusion is to uncertainty in the inputs.",data:"Plausible ranges (deterministic) or distributions (probabilistic) for the key parameters.",how:["One-way: vary each parameter → tornado","Probabilistic: Monte-Carlo → CEAC & EVPI","Read the probability of being cost-effective"]},
-    {t:"Budget impact analysis (BIA)",what:"The payer's affordability question — total additional spend over time as a new option is adopted.",data:"Eligible population, uptake over time, current vs new cost per patient, and the time horizon.",how:["Size the eligible population","Set uptake over the horizon","Read annual & cumulative budget impact"]}
-  ];
-  const links=[
-    {n:"DHR — Dept. of Health Research",d:"Apex body for health research policy under MoHFW.",u:"https://dhr.gov.in"},
-    {n:"HTAIn — Health Technology Assessment in India",d:"National HTA programme: methods, India reference case & reports.",u:"https://htain.icmr.org.in"},
-    {n:"ICMR",d:"Indian Council of Medical Research — guidelines & ethics.",u:"https://www.icmr.gov.in"},
-    {n:"MoHFW",d:"Ministry of Health & Family Welfare — policies & programmes.",u:"https://mohfw.gov.in"},
-    {n:"NHSRC",d:"National Health Systems Resource Centre — costing studies & National Health Accounts.",u:"https://nhsrcindia.org"},
-    {n:"National Health Authority (PM-JAY)",d:"Ayushman Bharat package rates & health-benefit packages.",u:"https://nha.gov.in"},
-    {n:"WHO-CHOICE",d:"WHO cost-effectiveness analysis & unit-cost database.",u:"https://www.who.int/teams/health-systems-governance-and-financing/economic-analysis/costing-and-technical-efficiency"},
-    {n:"CGHS rates",d:"Central Government Health Scheme reference tariffs.",u:"https://cghs.gov.in"},
-    {n:"ISPOR",d:"Global HEOR society — CHEERS 2022 & good-practice guidance.",u:"https://www.ispor.org"}
-  ];
+  const ck='<svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2l2.2 2.2 4.8-4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const methods=["Micro-costing","CPI-IW price conversion","Kaplan–Meier","Guyot reconstruction","Weibull · Gompertz · log-logistic","Hazard ratios","Simpson's 1/3","CEAC · CEAF","EVPI · EVPPI","Scenario analysis","Budget impact","Catastrophic health expenditure"];
+  const steps=[["01","Question","Population, comparators, outcome; the method is recommended."],["02","Costs","Micro or top-down costing, CPI-IW price years."],["03","Outcomes","QALYs, utilities, survival curves from trial data."],["04","Model","Markov, partitioned survival or decision tree."],["05","Uncertainty","PSA, tornado, EVPPI, scenarios."],["06","Budget impact","Affordability for the payer, year by year."],["07","Report","CHEERS 2022 checklist, Word or PDF."]];
   document.getElementById("landing").innerHTML=`
-    <div class="lhead">
-      <div class="brand"><div class="logo">अ</div><div><div class="name">Artha<b> HE</b></div><div class="tagline">Health Economics Workbench</div></div></div>
-      <button class="btn btn-primary" id="enterTop">Enter the Workbench →</button>
-    </div>
-    <div class="home">
-    <section class="hero">
-      <div class="fluid"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
-      <div class="hero-inner">
-        <div class="logo-hero"><div class="ring"></div><div class="tile">अ</div></div>
-        <div style="flex:1;min-width:280px">
-          <h1>Artha <b>HE</b></h1>
-          <div class="hero-tag">Making health-economic analysis easy — for everyone.</div>
-          <p class="lead">Health economics is not just about medicines — it covers <b>public-health programmes, screening, vaccination, policies and service-delivery interventions</b> in community medicine too. Artha HE turns your data into full economic analyses — costing, out-of-pocket burden, cost-effectiveness, modelling, sensitivity and budget impact — with the complex maths handled for you.</p>
-          <div class="pills"><span class="pill">Researchers</span><span class="pill">Teaching</span><span class="pill">India / LMIC</span><span class="pill">Payers / HTA</span></div>
-          <div class="cta"><button class="btn btn-primary btn-lg" id="ctaStart">Enter the Workbench →</button>
-            <button class="btn btn-secondary btn-lg" id="ctaMethods">See the methods</button></div>
+  <div class="lp">
+    <header class="lp-nav"><div class="lp-wrap lp-nav-in">
+      <a href="#" class="lp-brand" id="lpHome"><span class="lp-logo">अ</span><span>Artha HE</span></a>
+      <nav aria-label="Main" class="lp-links"><a href="#lp-how">How it works</a><a href="#lp-features">Features</a><a href="#lp-validation">Validation</a><a href="#lp-data">India data</a></nav>
+      <button class="lp-btn lp-dark" id="enterTop">Open the workbench</button>
+    </div></header>
+
+    <section class="lp-hero"><div class="lp-wrap lp-hero-in">
+      <div class="lp-hero-copy">
+        <div class="lp-badge lp-rise"><span class="lp-pulse"></span>Reproduces the published DARTH Sick-Sicker model</div>
+        <h1 class="lp-rise lp-d1">Health technology assessment, from <em>question</em> to report.</h1>
+        <p class="lp-lead lp-rise lp-d2">Costing, survival curves, Markov and partitioned-survival models, probabilistic sensitivity analysis and budget impact, in one guided flow, with India's reference data built in.</p>
+        <div class="lp-ctas lp-rise lp-d3">
+          <button class="lp-btn lp-teal lp-lg" id="ctaStart">Start a project <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="lp-btn lp-ghost lp-lg" id="ctaMethods">See how it is validated</button>
         </div>
+        <div class="lp-trust lp-rise lp-d4"><span>SRS 2020-24 life tables</span><span aria-hidden="true">·</span><span>CHEERS 2022 checklist</span><span aria-hidden="true">·</span><span>Open R engine</span></div>
       </div>
+      <div class="lp-hero-art">
+        <div class="lp-window lp-rise lp-d2">
+          <div class="lp-win-bar"><i></i><i></i><i></i><span>Built-in example · new treatment vs standard care</span></div>
+          <div class="lp-win-body">
+            <div class="lp-mini">
+              <div class="lp-rise lp-d3"><small>ICER / QALY</small><b>₹74,541</b></div>
+              <div class="lp-rise lp-d4"><small>P(cost-effective)</small><b class="lp-tealtxt">94.2%</b></div>
+              <div class="lp-rise lp-d5"><small>Δ QALYs</small><b>+1.370</b></div>
+            </div>
+            <svg viewBox="0 0 520 230" role="img" aria-label="Acceptability curve rising to 94 percent at the threshold">
+              <line x1="30" y1="200" x2="510" y2="200" stroke="#E2E8F0"/><line x1="30" y1="110" x2="510" y2="110" stroke="#F1F5F9"/><line x1="30" y1="20" x2="510" y2="20" stroke="#F1F5F9"/>
+              <line x1="263" y1="20" x2="263" y2="200" stroke="#0F766E" stroke-dasharray="4 4" opacity=".6"/>
+              <polyline class="lp-draw" points="30,200 78,160 126,76.2 174,46.1 222,34.1 263,29.9 318,26.4 414,24.3 510,22.8" fill="none" stroke="#0F172A" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle class="lp-late" cx="263" cy="29.9" r="6" fill="#0F766E"/><text class="lp-late" x="272" y="54" font-family="IBM Plex Mono" font-size="12" fill="#0F766E">94.2% at 1× GDP</text>
+              <text x="510" y="222" text-anchor="end" font-family="Inter" font-size="11" fill="#475569">willingness to pay →</text>
+            </svg>
+          </div>
+        </div>
+        <div class="lp-chip lp-float"><span class="lp-ck">${ck}</span><span><b>Checks passed</b><br><small>every transition row sums to 1</small></span></div>
+        <div class="lp-chip lp-chip-dark lp-float2"><small>SURVIVAL FIT</small><br>Weibull · lowest AIC</div>
+      </div>
+    </div></section>
+
+    <section class="lp-ticker" aria-label="Methods covered"><div class="lp-ticker-in">${methods.concat(methods).map(m=>`<span>${m}</span>`).join("")}</div></section>
+
+    <section class="lp-wrap lp-facts">
+      <div class="lp-rise lp-d1"><b>207</b><span>SRS life tables: India and 22 states, by sex and residence</span></div>
+      <div class="lp-rise lp-d2"><b>3</b><span>model types: Markov, partitioned survival, decision tree</span></div>
+      <div class="lp-rise lp-d3"><b>28</b><span>CHEERS 2022 items tracked as you work</span></div>
+      <div class="lp-rise lp-d4"><b>${compactINR(GDP_PC).replace(".00","")}</b><span>default threshold: 1× GDP per capita</span></div>
     </section>
 
-    <h2 class="sec">How it works</h2>
-    <p class="secsub">Four steps — and if you're not sure which analysis you need, the Evaluation tab has a built-in advisor that recommends the right method and tells you exactly what data is required.</p>
-    <div class="steps">
-      <div class="step"><div class="n">1</div><h4>Pick an analysis</h4><p>Costing, OOP, an economic evaluation (CMA/CEA/CUA/CBA), a Markov model, sensitivity or budget impact.</p></div>
-      <div class="step"><div class="n">2</div><h4>Use a template</h4><p>Download a ready-made CSV template, fill in your data, and upload it — or just type into the on-screen grid.</p></div>
-      <div class="step"><div class="n">3</div><h4>Run — one click</h4><p>Validated formulae compute ICERs, QALYs, CEAC, EVPI and more in the background, with clear charts.</p></div>
-      <div class="step"><div class="n">4</div><h4>Export</h4><p>Send any analysis to Excel, Word, PDF or PNG for your report, paper or presentation.</p></div>
-    </div>
+    <section class="lp-wrap lp-sec" id="lp-how">
+      <div class="lp-sec-head"><div><div class="lp-eyebrow">How it works</div><h2>One flow. Seven steps.<br>Nothing typed twice.</h2></div>
+        <p>Every result has a “Use this result” button that sends it to the step that needs it, and Artha records where each value came from for the report.</p></div>
+      <div class="lp-steps"><div class="lp-line"></div>${steps.map((x,i)=>`<div class="lp-step lp-rise lp-d${i+1}"><div class="lp-num ${i===0?"on":i===6?"end":""}">${x[0]}</div><b>${x[1]}</b><span>${x[2]}</span></div>`).join("")}</div>
+    </section>
 
-    <h2 class="sec">The components of economic evaluation</h2>
-    <p class="secsub">A quick reference to the building blocks — click any card to open that tool.</p>
-    <div class="defs" id="defGrid">
-      ${defs.map(d=>`<div class="def" ${d.go?`data-go="${d.go}"`:""}>
-        <span class="abbr ${d.cls}">${d.a}</span><h4>${d.h}</h4><p>${d.p}</p>${d.go?'<span class="go">Open tool →</span>':""}</div>`).join("")}
-    </div>
+    <section class="lp-wrap lp-bento" id="lp-features">
+      <article class="lp-card lp-span2"><div><div class="lp-eyebrow">Models</div><h3>Markov, partitioned survival and decision trees</h3><p>Treatment effects as hazard ratios, relative risks or odds ratios; state-specific costs and utilities; half-cycle or Simpson's correction.</p></div>
+        <svg viewBox="0 0 300 180" role="img" aria-label="Survival curves for two strategies"><line x1="10" y1="165" x2="290" y2="165" stroke="#E2E8F0"/><path class="lp-draw" d="M10 15 C 60 30, 90 110, 150 140 S 250 162, 290 163" fill="none" stroke="#0F172A" stroke-width="2.4"/><path class="lp-draw" d="M10 15 C 80 25, 120 95, 180 128 S 260 158, 290 160" fill="none" stroke="#0F766E" stroke-width="2.4"/><path d="M10 15 C 40 60, 60 125, 110 150 S 230 164, 290 164" fill="none" stroke="#0F172A" stroke-width="2" stroke-dasharray="6 5"/><text x="196" y="118" font-family="Inter" font-size="11" fill="#0F766E">New drug · OS</text><text x="40" y="150" font-family="Inter" font-size="11" fill="#475569">PFS</text></svg></article>
+      <article class="lp-card lp-darkcard"><div class="lp-eyebrow lp-gold">Survival</div><h3>Curves from a published Kaplan–Meier plot</h3><p>Paste the digitised points and the numbers at risk; Artha rebuilds patient-level data (Guyot 2012) and fits five distributions by AIC.</p></article>
+      <article class="lp-card"><div class="lp-eyebrow">Uncertainty</div><h3>Results you can defend</h3><p>Probabilistic analysis with a fixed seed, acceptability curves for every strategy, EVPI and EVPPI, and a tornado with ranges from your confidence intervals.</p></article>
+      <article class="lp-card" id="lp-data"><div class="lp-eyebrow">India data</div><h3>Verified reference values, built in</h3><p>GDP per capita (RBI/NSO), CPI-IW, SRS 2020-24 life tables and CGHS rates, each with its source and a verified flag.</p></article>
+      <article class="lp-card"><div class="lp-eyebrow">Report</div><h3>A report that writes itself</h3><p>Decision problem, inputs, results, scenarios and the CHEERS 2022 checklist, ready to print or download as Word.</p></article>
+    </section>
 
-    <h2 class="sec">How to do each analysis — and what data you need</h2>
-    <p class="secsub">New to health economics? Each card explains what the method is, the data it requires, and the steps to run it — so you know exactly what to prepare before you start.</p>
-    <div class="guide">
-      ${guide.map(gd=>`<div class="gcard">
-        <h4>${gd.t}</h4>
-        <div class="grow"><span class="glab">What it is</span><p>${gd.what}</p></div>
-        <div class="grow"><span class="glab">Data you need</span><p>${gd.data}</p></div>
-        <div class="grow"><span class="glab">How to do it</span><ol class="gsteps">${gd.how.map(s=>`<li>${s}</li>`).join("")}</ol></div>
-      </div>`).join("")}
-    </div>
+    <section class="lp-band" id="lp-validation"><div class="lp-wrap lp-val">
+      <div><div class="lp-eyebrow">Validation</div><h2>Matches the published model to the dollar.</h2>
+        <p>The engine is tested on every release against the DARTH Sick-Sicker cost-effectiveness model (Alarid-Escudero et al., Medical Decision Making 2023), and against R's survival package for curve fitting.</p>
+        <button class="lp-link" id="lpMethods">Read the methods →</button></div>
+      <div class="lp-tablewrap"><table class="lp-table"><thead><tr><th>Strategy</th><th>Artha cost</th><th>Published</th><th>QALYs</th></tr></thead><tbody>
+        <tr><td>Standard of care</td><td>$152,282</td><td>$152,282</td><td>21.03</td></tr><tr><td>Strategy A</td><td>$285,889</td><td>$285,889</td><td>21.83</td></tr>
+        <tr><td>Strategy B</td><td>$260,222</td><td>$260,222</td><td>22.50</td></tr><tr><td>Strategy AB</td><td>$380,378</td><td>$380,378</td><td>23.46</td></tr></tbody></table></div>
+    </div></section>
 
-    <div class="method" id="methods">
-      <h3>How Artha HE is built — and what it is for</h3>
-      <p>Artha HE uses <b style="color:#fff">standard, published health-economics methods</b> — discounting, half-cycle correction, ICER &amp; dominance, probabilistic sensitivity analysis (Gamma / Beta / Dirichlet), cost-effectiveness acceptability curves and EVPI — and the engine has been <b style="color:#fff">cross-validated against an independent implementation</b> (exact agreement). Defaults follow Indian / LMIC reference cases and reporting is structured to the CHEERS 2022 checklist.</p>
-      <p style="margin-top:10px">It is designed for <b style="color:#fff">teaching and scoping / first-pass analysis</b>. The reference values are indicative and the modelling is deliberately simplified — so always verify your inputs and assumptions before any formal study or submission. The <b style="color:#fff">Methods</b> page lists every assumption and limitation openly.</p>
-      <div class="badges"><span class="badge">Cross-validated</span><span class="badge">CHEERS 2022</span><span class="badge">Half-cycle correction</span><span class="badge">PSA · CEAC · EVPI</span><span class="badge">Teaching &amp; scoping</span></div>
-      <p style="margin-top:18px;color:#fff;font-size:14px"><b>Developed by Dr G Hari Prakash</b></p>
-    </div>
-    <h2 class="sec">Useful resources &amp; official links</h2>
-    <p class="secsub">Authoritative sources for HTA methods, reference cases, costing data and package rates — useful when preparing an analysis.</p>
-    <div class="links">
-      ${links.map(l=>`<a class="lcard" href="${l.u}" target="_blank" rel="noopener noreferrer"><div class="ln">${l.n} <span class="ext">↗</span></div><div class="ld">${l.d}</div></a>`).join("")}
-    </div>
+    <section class="lp-wrap lp-sec">
+      <h2>Built for the people who do the work</h2>
+      <div class="lp-aud"><div class="lp-card"><b>Researchers</b><p>Publication-ready tables and figures, with every input traceable to its source.</p></div><div class="lp-card"><b>Teaching</b><p>Worked examples and plain-language interpretation under every result.</p></div><div class="lp-card"><b>HTA &amp; payers</b><p>The India reference case, scenario analysis and budget impact in one place.</p></div></div>
+    </section>
 
-    <div style="text-align:center;margin-top:36px"><button class="btn btn-primary btn-lg" id="enterBottom">Enter the Workbench →</button></div>
-    <footer class="foot">Artha HE · Health Economics Workbench · for research &amp; teaching<br><b style="color:var(--ink-soft)">Developed by Dr G Hari Prakash</b></footer>
+    <section class="lp-wrap"><div class="lp-final"><div><h2>Start your assessment.</h2><p>Nothing to install: open it in your browser.</p></div><button class="lp-btn lp-white lp-lg" id="enterBottom">Open the workbench</button></div></section>
+    <footer class="lp-foot"><div class="lp-wrap"><span>Artha HE · developed by Dr G Hari Prakash</span><span>For research, teaching and health technology assessment. Verify inputs before formal use.</span></div></footer>
   </div>`;
   const enter=()=>enterApp("project");
   document.getElementById("enterTop").onclick=enter;
   document.getElementById("enterBottom").onclick=enter;
   document.getElementById("ctaStart").onclick=enter;
-  document.getElementById("ctaMethods").onclick=()=>document.getElementById("methods").scrollIntoView({behavior:"smooth"});
-  document.querySelectorAll("#defGrid .def[data-go]").forEach(d=>d.onclick=()=>enterApp(d.dataset.go));
+  document.getElementById("lpHome").onclick=e=>{e.preventDefault();window.scrollTo({top:0,behavior:"smooth"});};
+  document.getElementById("ctaMethods").onclick=()=>document.getElementById("lp-validation").scrollIntoView({behavior:"smooth"});
+  document.getElementById("lpMethods").onclick=()=>{enterApp("methods");};
+  // Reveal sections as they scroll into view.
+  const io="IntersectionObserver" in window?new IntersectionObserver(es=>es.forEach(en=>{if(en.isIntersecting){en.target.classList.add("lp-in");io.unobserve(en.target);}}),{threshold:.15}):null;
+  document.querySelectorAll("#landing .lp-sec, #landing .lp-bento, #landing .lp-facts, #landing .lp-band, #landing .lp-final").forEach(el=>{if(io){el.classList.add("lp-reveal");io.observe(el);}});
 }
 function enterApp(mod){document.getElementById("landing").style.display="none";document.getElementById("appShell").style.display="";window.scrollTo(0,0);route(mod||"costing");}
 function backToLanding(){document.getElementById("appShell").style.display="none";const l=document.getElementById("landing");l.style.display="";window.scrollTo(0,0);}
@@ -787,7 +780,7 @@ async function renderModel(){
   const m=state.model,ws=document.getElementById("workspace");
   if(!(m.states.some(s=>+s.util>0||+s.cost>0)||m.strategies.some(s=>+s.addCost>0)))return emptyState("Decision-analytic modeling","Define your health states (cost, utility, disability weight) and fill each strategy's transition matrix in the panel on the left — or load a worked example — then Run model.");
   wsBusy("Markov model");
-  let R;try{R=await api("model",m);}catch(e){return wsError(e);}
+  let R;try{R=await api("model",typeof modelPayload==="function"?modelPayload():m);}catch(e){return wsError(e);}
   markRun("modeling");
   const inc=R.rows,best=R.best,unit=R.unit,lowerBetter=m.outcome==="DALY";
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
@@ -805,6 +798,7 @@ async function renderModel(){
   ws.querySelector('[data-pane="inc"]').insertAdjacentHTML("afterend",det);
   wireTabs("mTabs");wireExports("Artha Markov Model");addInterp(R);
   ws.insertAdjacentHTML("beforeend",modelToEvalCard(R.rows,m.outcome));
+  if(typeof decorateModelResults==="function")decorateModelResults(R);
 }
 
 /* ============================ SENSITIVITY ============================ */
@@ -1268,9 +1262,19 @@ function route(mod){
 document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));
 // Active tab + a green dot on each step that has been run; keep the active tab visible in the strip.
 function syncNav(){
+  syncChrome();
   const runs=state.runs||{},key={modeling:"modeling",sensitivity:"sensitivity",costing:"costing",vb:"vb",survival:"survival",evaluation:"evaluation",oop:"oop",bia:"bia"};
-  document.querySelectorAll("#topnav button").forEach(b=>{const m=b.dataset.mod;b.classList.toggle("active",m===state.module);b.classList.toggle("done",!!(key[m]&&runs[key[m]]));
-    if(m===state.module){const nav=b.parentElement,l=b.offsetLeft,r=l+b.offsetWidth;if(l<nav.scrollLeft+12||r>nav.scrollLeft+nav.clientWidth-24)nav.scrollLeft=l-nav.clientWidth/2+b.offsetWidth/2;}});
+  let steps=[];try{if(typeof flowSteps==="function")steps=flowSteps();}catch(e){}
+  const qDone=steps.length&&steps[0].done;
+  document.querySelectorAll("#topnav button").forEach(b=>{const m=b.dataset.mod;b.classList.toggle("active",m===state.module);b.classList.toggle("done",m==="project"?!!qDone:!!(key[m]&&runs[key[m]]));
+    if(m===state.module&&b.parentElement.id==="topnav"){const nav=b.parentElement,l=b.offsetLeft,r=l+b.offsetWidth;if(nav.scrollWidth>nav.clientWidth+1&&(l<nav.scrollLeft+12||r>nav.scrollLeft+nav.clientWidth-24))nav.scrollLeft=l-nav.clientWidth/2+b.offsetWidth/2;}});
+}
+// Header: project name; rail: progress through the required steps.
+function syncChrome(){
+  const c=document.getElementById("hdrProject");if(c)c.textContent=(state.project&&state.project.title)||"Untitled project";
+  let steps=[];try{if(typeof flowSteps==="function")steps=flowSteps().filter(x=>x.need==="required"&&x.key!=="report");}catch(e){}
+  const bar=document.getElementById("railBar"),txt=document.getElementById("railTxt");
+  if(bar&&steps.length){const d=steps.filter(x=>x.done).length;bar.style.width=Math.round(100*d/steps.length)+"%";txt.textContent=`${d} of ${steps.length} steps`;}
 }
 // On small screens the results sit below the form: jump to them after pressing the run button.
 document.getElementById("sidebar").addEventListener("click",e=>{const b=e.target.closest(".divider + .btn-primary.btn-block");if(!b||window.innerWidth>980)return;

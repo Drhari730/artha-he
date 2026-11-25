@@ -181,7 +181,7 @@ async function renderAltModel(){
   const k=modelKind(),am=activeModel(),ws=document.getElementById("workspace");
   if(!modelReady(am))return emptyState(k==="psm"?"Partitioned survival model":"Decision tree",k==="psm"?"Set the overall-survival and progression-free-survival curves for each strategy (fit them in the Survival tab, enter published parameters, or use a hazard ratio), the costs and utilities of each state, then Run model. Or load the oncology example.":"Build each strategy's tree in the panel on the left: branches with probabilities, costs and outcomes. Or load the surgery example.");
   wsBusy(k==="psm"?"Partitioned survival model":"Decision tree");
-  let R;try{R=await api("model",am);}catch(e){return wsError(e);}
+  let R;try{R=await api("model",typeof modelPayload==="function"?modelPayload():am);}catch(e){return wsError(e);}
   markRun("modeling");
   const inc=R.rows,best=R.best,unit=R.unit;
   const tagFor=s=>s.status==="dominated"?`<span class="tag dominated">dominated</span>`:s.status==="extended"?`<span class="tag ext">ext. dom.</span>`:`<span class="tag frontier">frontier</span>`;
@@ -207,6 +207,7 @@ async function renderAltModel(){
     <div class="pane" data-pane="inc"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th>${head}<th>Δ Cost</th><th>Δ ${unit}</th><th>ICER</th><th style="text-align:left">Status</th></tr></thead><tbody>${incRows}</tbody></table></div></div></div>`;
   wireTabs("mTabs");wireExports(k==="psm"?"Artha Partitioned Survival":"Artha Decision Tree");addInterp(R);
   ws.insertAdjacentHTML("beforeend",modelToEvalCard(R.rows,am.outcome));
+  if(typeof decorateModelResults==="function")decorateModelResults(R);
 }
 
 /* ------------------------------ survival tab ------------------------------ */
@@ -313,7 +314,7 @@ function ceacMultiChart(curves,ceaf){
   const W=680,H=380,ox=60,oy=H-50,pw=W-ox-26,ph=oy-22,pts0=curves[0].points,xmax=pts0[pts0.length-1].wtp,X=v=>ox+(v/xmax)*pw,Y=v=>oy-v*ph;let g="";
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax)g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i+1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});});
+  [GDP_PC,GDP_PC*3].forEach((w,i)=>{if(w<=xmax)g+=`<line x1="${X(w)}" y1="18" x2="${X(w)}" y2="${oy}" stroke="${C.gold}" stroke-dasharray="4 4"/>`+txt(X(w),14,(i?3:1)+"×GDP",{anchor:"middle",fill:C.gold,size:10,weight:600});});
   curves.forEach((c,i)=>{g+=`<polyline points="${c.points.map(p=>`${X(p.wtp)},${Y(p.prob)}`).join(" ")}" fill="none" stroke="${SERIES[i%6]}" stroke-width="2.4"><title>${escHTML(c.name)}</title></polyline>`;});
   ceaf.forEach(f=>{g+=`<circle cx="${X(f.wtp)}" cy="${Y(f.prob)}" r="3.4" fill="none" stroke="${C.ink}" stroke-width="1.4"><title>Frontier: ${escHTML(f.strategy)} (${(f.prob*100).toFixed(0)}%)</title></circle>`;});
   g+=txt(ox+pw/2,H-12,"Willingness-to-pay (₹)",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);

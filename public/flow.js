@@ -214,6 +214,7 @@ function renderProject(){
       <div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">#</th><th style="text-align:left">Item</th><th style="text-align:left">Status</th><th style="text-align:left">Content / what to add</th></tr></thead><tbody>${ch.map(x=>`<tr><td style="text-align:left">${x.n}</td><td style="text-align:left">${x.topic}</td><td style="text-align:left"><span class="tag ${CH_TAG[x.status][0]}">${CH_TAG[x.status][1]}</span></td><td style="text-align:left;white-space:normal">${escHTML(x.text)}</td></tr>`).join("")}</tbody></table></div>
       <p class="note">CHEERS 2022: Husereau D, et al. Consolidated Health Economic Evaluation Reporting Standards 2022 (CHEERS 2022) statement. <i>Value Health</i> 2022;25(1):3–9.</p></div>`;
   ws.querySelectorAll("[data-go]").forEach(b=>b.onclick=ev=>{ev.preventDefault();const g=b.dataset.go;if(g==="report")openReport();else if(g==="project")renderProjectSidebar();else route(g);});
+  if(typeof syncNav==="function")syncNav();
 }
 
 /* ---------------------- "Use this result" links ------------------------- */
