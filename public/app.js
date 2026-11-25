@@ -334,7 +334,7 @@ function renderLanding(){
 
     <section class="lp-hero"><div class="lp-wrap lp-hero-in">
       <div class="lp-hero-copy">
-        <div class="lp-badge lp-rise"><span class="lp-pulse"></span>Reproduces the published DARTH Sick-Sicker model</div>
+        <div class="lp-badge lp-rise"><span class="lp-pulse"></span>Validated against a published, peer-reviewed model</div>
         <h1 class="lp-rise lp-d1">Health technology assessment, from <em>question</em> to report.</h1>
         <p class="lp-lead lp-rise lp-d2">Costing, survival curves, Markov and partitioned-survival models, probabilistic sensitivity analysis and budget impact, in one guided flow, with India's reference data built in.</p>
         <div class="lp-ctas lp-rise lp-d3">
