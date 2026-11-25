@@ -272,7 +272,7 @@ function useCard(kind,value,what,from,fmt){
     const o=document.getElementById(id+"_open");if(o)o.onclick=ev=>{ev.preventDefault();route(r.go);};
     if(r.ok){const sel=document.getElementById(id+"_dest"),cur=sel.value;sel.innerHTML=useDestinations(kind).map(([v,l])=>`<option value="${v}">${l}</option>`).join("");if([...sel.options].some(o=>o.value===cur))sel.value=cur;}
   };},0);
-  return `<div class="card use-card" style="border-left:4px solid var(--primary)"><h3>Use this result</h3><div class="card-sub">Send ${what} (<b>${fmt?fmt(value):value}</b>) straight to the step that needs it. Artha records where it came from for the report.</div>
+  return `<div class="card use-card"><h3>Use this result</h3><div class="card-sub">Send ${what} (<b>${fmt?fmt(value):value}</b>) straight to the step that needs it. Artha records where it came from for the report.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="${id}_dest" style="flex:1;min-width:240px">${d.map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><button class="btn btn-primary sm" id="${id}_go">Use it</button></div><div id="${id}_msg" style="margin-top:8px;font-size:12.5px"></div></div>`;
 }
 // Model results → Evaluation (one option per strategy).
@@ -283,7 +283,7 @@ function modelToEvalCard(rows,outcome){
     state.provenance=state.provenance||{};
     rows.forEach((r,i)=>{state.provenance[`eval-cost:${i}`]={target:`cost and outcome of “${r.name}”`,from:"Markov model",value:r.cost,at:new Date().toISOString()};});
     saveLocal();route("evaluation");};},0);
-  return `<div class="card use-card" style="border-left:4px solid var(--primary)"><h3>Use these results</h3><div class="card-sub">Send each strategy's discounted cost and ${outcome==="DALY"?"DALYs (as negative values, so higher is better)":"QALYs"} to the Evaluation tab as the options to compare.</div><button class="btn btn-primary sm" id="m2e">Send all strategies to Evaluation →</button></div>`;
+  return `<div class="card use-card"><h3>Use these results</h3><div class="card-sub">Send each strategy's discounted cost and ${outcome==="DALY"?"DALYs (as negative values, so higher is better)":"QALYs"} to the Evaluation tab as the options to compare.</div><button class="btn btn-primary sm" id="m2e">Send all strategies to Evaluation →</button></div>`;
 }
 
 /* ----------------------- report payload extras -------------------------- */

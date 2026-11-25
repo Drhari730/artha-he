@@ -5,6 +5,7 @@
    Loaded after app.js; shares its globals.
    ============================================================================= */
 
+const SURV_COLORS=["#0F766E","#B45309","#2563EB","#BE185D","#64748B"];
 const SURV_LABEL={exponential:"Exponential",weibull:"Weibull",gompertz:"Gompertz",llogis:"Log-logistic",lnorm:"Log-normal"};
 const SURV_PARAMS={exponential:["rate"],weibull:["shape","scale"],gompertz:["shape","rate"],llogis:["shape","scale"],lnorm:["meanlog","sdlog"]};
 const UNITS={days:"days",weeks:"weeks",months:"months",years:"years"};
@@ -266,7 +267,7 @@ function survChart(km,curves,chosen,unit,T){
   for(let i=0;i<=4;i++){const yy=oy-(i/4)*ph;g+=`<line x1="${ox}" y1="${yy}" x2="${ox+pw}" y2="${yy}" stroke="${C.line}"/>`+txt(ox-8,yy+4,(i*25)+"%",{anchor:"end",fill:C.muted,size:10,mono:true});}
   for(let i=0;i<=5;i++){const v=T*i/5;g+=txt(X(v),oy+16,fmtNum(v,0),{anchor:"middle",fill:C.muted,size:10,mono:true});}
   g+=`<line x1="${ox}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.2"/>`;
-  curves.forEach((c,i)=>{const sel=c.dist===chosen;g+=`<polyline points="${c.points.map(p=>`${X(p.x)},${Y(p.y)}`).join(" ")}" fill="none" stroke="${SERIES[i%6]}" stroke-width="${sel?3.2:1.6}" ${sel?"":'stroke-dasharray="5 4" opacity="0.8"'}><title>${SURV_LABEL[c.dist]}</title></polyline>`;});
+  curves.forEach((c,i)=>{const sel=c.dist===chosen;g+=`<polyline points="${c.points.map(p=>`${X(p.x)},${Y(p.y)}`).join(" ")}" fill="none" stroke="${SURV_COLORS[i%5]}" stroke-width="${sel?3.2:1.6}" ${sel?"":'stroke-dasharray="5 4" opacity="0.8"'}><title>${SURV_LABEL[c.dist]}</title></polyline>`;});
   let pts=[];km.forEach((k,i)=>{if(i>0)pts.push(`${X(k.time)},${Y(km[i-1].surv)}`);pts.push(`${X(k.time)},${Y(k.surv)}`);});
   g+=`<polyline points="${pts.join(" ")}" fill="none" stroke="${C.ink}" stroke-width="2"><title>Kaplan-Meier</title></polyline>`;
   g+=txt(ox+pw/2,H-8,"Time ("+unit+")",{anchor:"middle",fill:C.muted,size:11});return svgWrap(W,H,g);
@@ -287,9 +288,9 @@ async function renderSurv(){
   ws.innerHTML=`<div class="ws-head"><div><h2>Survival curves — ${escHTML(a.name)} (${a.endpoint.toUpperCase()})</h2><div class="sub">${R.n} patients, ${R.events} events${R.reconstructed?" · reconstructed from the published curve (Guyot et al. 2012)":""}. Maximum-likelihood fits with right censoring; extrapolated to ${fmtNum(T,0)} ${R.unit}.</div></div>${EXPORT_BAR}</div>
     <div class="kpis"><div class="kpi accent"><div class="k-label">Best fit (lowest AIC)</div><div class="k-val sm">${SURV_LABEL[R.best]}</div><div class="k-sub">ΔAIC &lt; 2 = similar support</div></div><div class="kpi"><div class="k-label">Patients / events</div><div class="k-val mono">${R.n} / ${R.events}</div></div><div class="kpi gold"><div class="k-label">Chosen for the model</div><div class="k-val sm">${SURV_LABEL[a.chosen]}</div><div class="k-sub">pick on fit and clinical plausibility</div></div></div>
     <div class="result-tabs" id="svTabs"><button class="result-tab active" data-p="plot">Fit &amp; extrapolation</button><button class="result-tab" data-p="tbl">Goodness of fit</button></div>
-    <div class="pane active" data-pane="plot"><div class="card flush"><div class="pad"><h3>Kaplan-Meier and fitted curves</h3><div class="card-sub">Black: Kaplan-Meier. Solid: the chosen curve; dashed: the alternatives. Judge the tail: extrapolation must be clinically plausible, not just fit well.</div>${survChart(R.km,R.curves,a.chosen,R.unit,T)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.ink}"></span>Kaplan-Meier</div>${R.curves.map((c,i)=>`<div class="item"><span class="sw" style="background:${SERIES[i%6]}"></span>${SURV_LABEL[c.dist]}</div>`).join("")}</div></div></div>
+    <div class="pane active" data-pane="plot"><div class="card flush"><div class="pad"><h3>Kaplan-Meier and fitted curves</h3><div class="card-sub">Black: Kaplan-Meier. Solid: the chosen curve; dashed: the alternatives. Judge the tail: extrapolation must be clinically plausible, not just fit well.</div>${survChart(R.km,R.curves,a.chosen,R.unit,T)}</div><div class="legend"><div class="item"><span class="sw" style="background:${C.ink}"></span>Kaplan-Meier</div>${R.curves.map((c,i)=>`<div class="item"><span class="sw" style="background:${SURV_COLORS[i%5]}"></span>${SURV_LABEL[c.dist]}</div>`).join("")}</div></div></div>
     <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">Distribution</th><th style="text-align:left">Parameters (${R.unit})</th><th>AIC</th><th>ΔAIC</th><th>BIC</th><th>Median</th><th>Mean to ${fmtNum(T,0)}</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note">Parameterisation as in R flexsurv. Fits are checked against R's survival::survreg in the test suite.</p></div></div>`;
-  wireTabs("svTabs");wireExports("Artha Survival");
+  wireTabs("svTabs");wireExports("Artha Survival");setVerdict("info",`${SURV_LABEL[R.best]} fits best (lowest AIC)${a.chosen!==R.best?`; ${SURV_LABEL[a.chosen]} chosen for the model`:""}`,`${R.n} patients, ${R.events} events${R.reconstructed?", rebuilt from the published curve":""}. Check that the extrapolated tail is clinically plausible before using it.`);
   document.querySelectorAll('input[name="svChoose"]').forEach(el=>el.onchange=()=>{a.chosen=el.value;saveLocal();renderSurv();});
   ws.insertAdjacentHTML("beforeend",curveUseCard(a));
   addInterp({interpretation:[`${SURV_LABEL[R.best]} fits best by AIC; models within about 2 AIC points have similar statistical support.`,"Choose the curve on statistical fit, visual fit and, above all, the clinical plausibility of the long-term extrapolation (NICE DSU TSD 14). Test the alternatives as scenarios.","When the curve is used in the partitioned survival model, its parameter uncertainty is carried into the probabilistic sensitivity analysis."]});
@@ -305,7 +306,7 @@ function curveUseCard(a){
     state.provenance=state.provenance||{};state.provenance[`psm-${ep}:${i}`]={target:`${ep.toUpperCase()} curve of “${P.strategies[i].name}”`,from:`Survival fit: ${spec.spec.label}`,value:0,at:new Date().toISOString()};
     saveLocal();document.getElementById("svUseMsg").innerHTML=`<span style="color:var(--emerald);font-weight:600">✓ Used as the ${ep.toUpperCase()} curve of “${escHTML(P.strategies[i].name)}”.</span> <a href="#" id="svOpen" style="color:var(--primary);font-weight:600">Open the model →</a>`;
     document.getElementById("svOpen").onclick=ev=>{ev.preventDefault();state.model.type="psm";P.active=i;route("modeling");};};},0);
-  return `<div class="card use-card" style="border-left:4px solid var(--primary)"><h3>Use this curve</h3><div class="card-sub">Send the ${SURV_LABEL[a.chosen]} curve (with its parameter uncertainty) to the partitioned survival model.</div>
+  return `<div class="card use-card"><h3>Use this curve</h3><div class="card-sub">Send the ${SURV_LABEL[a.chosen]} curve (with its parameter uncertainty) to the partitioned survival model.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="svUseDest" style="flex:1;min-width:240px">${opts}</select><button class="btn btn-primary sm" id="svUseGo">Use it</button></div><div id="svUseMsg" style="margin-top:8px;font-size:12.5px"></div></div>`;
 }
 

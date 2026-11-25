@@ -164,3 +164,17 @@ document.getElementById("sidebar").addEventListener("keydown", e => {
   const run = document.querySelector("#sidebar .divider + .btn-primary.btn-block"); if (!run) return;
   e.preventDefault(); t.blur(); setTimeout(() => run.click(), 0);
 });
+
+/* --------------------- verdict banner for every results screen --------------------- */
+// kind: "ok" (teal tick), "warn" (amber), "info" (neutral). Placed under the heading.
+function setVerdict(kind, title, sub) {
+  const ws = document.getElementById("workspace"); if (!ws) return;
+  const old = ws.querySelector(":scope > .verdict"); if (old) old.remove();
+  const icon = kind === "ok" ? '<path d="M4.5 10.5l3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    : kind === "warn" ? '<path d="M10 5v6M10 14.5v.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+    : '<path d="M10 9v5M10 6v.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>';
+  const html = `<div class="verdict ${kind === "warn" ? "no" : kind === "info" ? "info" : ""}"><span class="vi"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">${icon}</svg></span><div class="vb"><div class="vt">${title}</div>${sub ? `<div class="vs">${sub}</div>` : ""}</div></div>`;
+  const anchor = ws.querySelector(":scope > .scen-pills") || ws.querySelector(":scope > .ws-head") || ws.querySelector(".ws-head");
+  if (anchor) anchor.insertAdjacentHTML("afterend", html); else ws.insertAdjacentHTML("afterbegin", html);
+}
+const atThreshold = w => Math.abs(+w - GDP_PC) < 1 ? "1× GDP per capita" : fmtINR(+w);

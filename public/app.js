@@ -149,7 +149,7 @@ function cePlane(points,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-2
   g+=`<line x1="${ox}" y1="18" x2="${ox}" y2="${oy+24}" stroke="${C.ink}" stroke-width="1.3"/><line x1="${ox-pw}" y1="${oy}" x2="${ox+pw}" y2="${oy}" stroke="${C.ink}" stroke-width="1.3"/>`;
   const cap=Math.min(yMax,wtp*xMax);g+=`<line x1="${ox}" y1="${oy}" x2="${X(cap/wtp)}" y2="${Y(cap)}" stroke="${C.emerald}" stroke-dasharray="7 5" stroke-width="1.6"/>`;
   g+=txt(X(cap/wtp)-6,Y(cap)-8,"WTP "+compactINR(wtp)+"/QALY",{anchor:"end",fill:C.emerald,size:11,weight:600});
-  g+=txt(ox+pw,oy+22,"+ effect →",{anchor:"end",fill:C.muted,size:11})+txt(ox+8,26,"↑ + cost",{fill:C.muted,size:11});
+  g+=txt(ox+pw,oy+22,"+ effect →",{anchor:"end",fill:C.muted,size:11})+txt(ox-8,26,"↑ + cost",{fill:C.muted,size:11,anchor:"end"});
   points.forEach(p=>{g+=`<circle cx="${X(p.dEff)}" cy="${Y(p.dCost)}" r="7" fill="${p.ref?C.muted:C.primary}" stroke="#fff" stroke-width="1.5"><title>${p.label} — Δcost ${compactINR(p.dCost)}, Δeffect ${(+p.dEff).toFixed(3)}</title></circle>`+txt(X(p.dEff)+12,Y(p.dCost)+4,p.label,{fill:C.ink,size:12,weight:500});});
   return svgWrap(W,H,g);}
 function scatterPSA(d,wtp){const W=680,H=430,ox=110,oy=H-66,pw=W-ox-50,ph=oy-26,xMax=Math.max(.01,...d.map(x=>Math.abs(x.incEff)))*1.2,yMax=Math.max(1,...d.map(x=>Math.abs(x.incCost)))*1.2,X=v=>ox+(v/xMax)*pw,Y=v=>oy-(v/yMax)*ph;let g="";
@@ -315,8 +315,8 @@ const EX_NOTE={}, EX_CUR={};
 const RENDERERS={costing:["renderCostingSidebar","renderCosting"],oop:["renderOopSidebar","renderOop"],evaluation:["renderEvalSidebar","renderEval"],model:["renderModelSidebar","renderModel"],bia:["renderBiaSidebar","renderBia"]};
 function loadExample(mod,key){const ex=EXAMPLES[mod][key];if(!ex)return;const {note,...data}=JSON.parse(JSON.stringify(ex));Object.assign(state[mod],data);if(mod==="model"&&state.sens)state.sens.params=null;EX_NOTE[mod]=note;EX_CUR[mod]=key;const[sb,rn]=RENDERERS[mod];window[sb]();window[rn]();saveLocal();}
 function exRow(mod){const cur=EX_CUR[mod];const b=(k,l)=>`<button data-ex="${k}" class="${cur===k?'active':''}">${l}</button>`;
-  return `<div class="start-note"><span class="sn-title">▶ To run your analysis</span>Enter your own data in the fields below, or download a <b>template</b>, fill it in and upload — then click the button to run.</div>
-  <div class="ex-row"><span class="ex-lab">Just exploring? Load a worked example to see how it works</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}${mod==="model"?b("darth","DARTH (validation)"):""}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
+  return `<div class="start-note"><span class="sn-title">How to run your analysis</span>Enter your own data in the fields below, or download a <b>template</b>, fill it in and upload — then click the button to run.</div>
+  <div class="ex-row"><span class="ex-lab">Just exploring? Load a worked example</span><div class="ex-btns">${b("general","General")}${b("public","Public health")}${b("digital","Digital health")}${mod==="model"?b("darth","DARTH (validation)"):""}</div>${EX_NOTE[mod]?`<div class="ex-note">${EX_NOTE[mod]}</div>`:""}</div>`;}
 function wireExamples(mod){document.querySelectorAll("#sidebar .ex-row [data-ex]").forEach(b=>b.onclick=()=>loadExample(mod,b.dataset.ex));}
 
 /* ============================ HOME ============================ */
@@ -497,7 +497,7 @@ async function renderCosting(){
     ws.innerHTML=`<div class="ws-head"><div><h2>Gross costing</h2><div class="sub">Top-down: total expenditure ÷ output units.</div></div>${EXPORT_BAR}</div>
       <div class="kpis"><div class="kpi accent"><div class="k-label">Total cost</div><div class="k-val">${compactINR(res.total)}</div><div class="k-sub">${fmtINR(res.total)}</div></div><div class="kpi gold"><div class="k-label">Cost per unit</div><div class="k-val">${compactINR(per)}</div><div class="k-sub">over ${fmtNum(res.output,0)} units</div></div></div>
       <div class="card"><h3>Calculation</h3><table class="results-table"><tbody><tr><td>Total cost</td><td>${fmtINR(res.total)}</td></tr><tr><td>Output units</td><td>${fmtNum(res.output,0)}</td></tr><tr><td>Average cost per unit</td><td>${fmtINR(per,2)}</td></tr></tbody></table></div>`;
-    wireExports("Artha Gross Costing");ws.insertAdjacentHTML("beforeend",useCard("cost",res.per,"the cost per unit","Gross costing",fmtINR));return;}
+    wireExports("Artha Gross Costing");setVerdict("info",`Average cost ${fmtINR(res.per,2)} per unit`,`${fmtINR(res.total)} total expenditure over ${fmtNum(res.output,0)} output units (top-down).`);ws.insertAdjacentHTML("beforeend",useCard("cost",res.per,"the cost per unit","Gross costing",fmtINR));return;}
   if(res.method==="advanced"){
     const bars=res.breakdown.map((b,i)=>({label:b.component,value:b.amount,tag:compactINR(b.amount)+"  ·  "+pct(b.share),color:SERIES[i%6]}));
     const brk=res.breakdown.map(b=>`<tr><td>${b.component}</td><td>${fmtINR(b.amount)}</td><td>${pct(b.share)}</td></tr>`).join("");
@@ -515,7 +515,7 @@ async function renderCosting(){
       <div class="pane active" data-pane="brk"><div class="card flush"><div class="pad"><h3>Cost by component</h3><div class="card-sub">Share of the total annual cost by resource type.</div>${barChartH(bars)}</div></div>
         <div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Component</th><th>Amount</th><th>Share</th></tr></thead><tbody>${brk}</tbody><tfoot><tr><td>Total</td><td>${fmtINR(res.total)}</td><td>100%</td></tr></tfoot></table></div></div></div>
       <div class="pane" data-pane="det">${detail}</div>`;
-    wireTabs("costTabs");wireExports("Artha Advanced Costing");
+    wireTabs("costTabs");wireExports("Artha Advanced Costing");{const top=res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0];setVerdict("info",`${fmtINR(res.perUnit)} per unit; ${fmtINR(res.total)} a year in total`,top?`${escHTML(top.component)} is the largest component (${pct(top.share)}).`:"");}
     document.getElementById("workspace").insertAdjacentHTML("beforeend",interpCard([
       `The total annual cost is ${fmtINR(res.total)} (${compactINR(res.perUnit)} per unit). ${res.breakdown.length?res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].component+" is the largest component ("+pct(res.breakdown.slice().sort((a,b)=>b.amount-a.amount)[0].share)+").":""}`,
       `Staff time is apportioned from monthly salary (salary ÷ ${res.monthlyHours} hrs × hours used); equipment is converted to an equivalent annual cost using the annualisation factor at ${pct(res.discount,0)}, so one-off purchases are spread fairly over their useful life.`,
@@ -529,7 +529,7 @@ async function renderCosting(){
     <div class="result-tabs" id="costTabs"><button class="result-tab active" data-p="cat">By category</button><button class="result-tab" data-p="lines">Cost lines</button></div>
     <div class="pane active" data-pane="cat"><div class="card flush"><div class="pad"><h3>Cost by category</h3><div class="card-sub">Share of total across perspective categories.</div>${barChartH(bars)}</div></div></div>
     <div class="pane" data-pane="lines"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Qty</th><th>Unit (adj)</th><th>Line cost</th></tr></thead><tbody>${lr}</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td>${fmtINR(res.total)}</td></tr></tfoot></table></div></div></div>`;
-  wireTabs("costTabs");wireExports("Artha Micro Costing");
+  wireTabs("costTabs");wireExports("Artha Micro Costing");{const top=res.byCat.slice().sort((a,b)=>b.cost-a.cost)[0];setVerdict("info",`Total cost ${fmtINR(res.total)} in ${escHTML(c.toYear)} prices`,top?`${escHTML(top.category)} is the largest share (${pct(top.share)}) across ${res.lines.length} cost lines.`:"");}
   ws.insertAdjacentHTML("beforeend",useCard("cost",res.total,"the total cost","Micro-costing ("+c.toYear+" prices)",fmtINR));
 }
 
@@ -576,6 +576,8 @@ async function renderOop(){
     <div class="pane" data-pane="items"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Item</th><th style="text-align:left">Category</th><th>Amount</th></tr></thead><tbody>${it}</tbody><tfoot><tr><td>Total OOP</td><td></td><td>${fmtINR(r.total)}</td></tr></tfoot></table></div>
       <p class="note">CHE definitions: out-of-pocket payments for health goods and services (the <b>Direct medical</b> category) &gt; 10% (or 25%: ${r.che25?"yes":"no"}) of household consumption expenditure (SDG 3.8.2), or &gt; 40% of capacity-to-pay (WHO). Transport, food and lost income (${fmtINR(r.nonHealth)}) are part of the economic burden but are excluded from the CHE ratios.</p></div></div>`;
   wireTabs("oopTabs");wireExports("Artha Out-of-Pocket");
+  if(+o.income>0)setVerdict(r.che10?"warn":"ok",r.che10?`Catastrophic: health payments are ${pct(r.pctInc)} of household consumption`:`Not catastrophic: health payments are ${pct(r.pctInc)} of household consumption`,`${r.che10?"Above":"Below"} the 10% threshold (SDG 3.8.2)${r.che25?" and above 25%":""}; ${+o.nonFood>0?`${pct(r.pctCTP)} of capacity-to-pay, ${r.che40?"above":"below"} the 40% threshold (WHO)`:"add capacity-to-pay to check the 40% threshold"}.`);
+  else setVerdict("info",`Total out-of-pocket spending ${fmtINR(r.total)}`,"Enter household consumption (or income) to check whether it is catastrophic.");
 }
 
 /* ============================ EVALUATION ============================ */
@@ -588,7 +590,7 @@ function renderEvalSidebar(){
     ${exRow("evaluation")}
     <div class="sublabel">Analysis type</div>
     <div class="seg types" id="evalType">${typeBtns}</div>
-    <div class="advisor"><label style="font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Not sure? What outcome do you have?</label>
+    <div class="advisor"><label style="font-size:13px;font-weight:600;color:var(--ink)">Not sure which analysis? What outcome do you have?</label>
       <select id="advisor" style="margin-top:7px"><option value="">— choose —</option>
         <option value="qaly">QALYs / quality of life</option><option value="life">Life-years / deaths averted</option>
         <option value="clinical">A clinical unit (mmHg, % controlled)</option><option value="money">A value in money (₹)</option>
@@ -632,7 +634,7 @@ async function renderEval(){
       <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>Net monetary benefit</h3><div class="card-sub">Monetised benefit minus cost for each option.</div>${barChartV(bars,compactINR)}</div></div></div>
       <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Benefit</th><th>Net benefit</th><th>BCR</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CBA");addInterp(R);return;
+    wireTabs("evTabs");wireExports("Artha CBA");addInterp(R);setVerdict(best.net>0?"ok":"warn",`${escHTML(best.strategy)} gives the highest net benefit: ${fmtINR(best.net)}`,best.bcr!=null?`Benefit–cost ratio ${fmtNum(best.bcr,2)}${best.bcr>1?": benefits exceed costs.":": costs exceed benefits."}`:"");return;
   }
   if(e.type==="CMA"){
     const d=R.rows,best=R.best,equal=R.equal;
@@ -641,7 +643,7 @@ async function renderEval(){
       <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Cost comparison</button><button class="result-tab" data-p="req">Requirements</button></div>
       <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div>${equal?"":'<p class="note">Outcomes differ across options — cost-minimisation assumes equivalence. A CEA or CUA may be more appropriate.</p>'}</div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CMA");addInterp(R);return;
+    wireTabs("evTabs");wireExports("Artha CMA");addInterp(R);setVerdict(equal?"ok":"warn",`${escHTML(best.strategy)} is the least costly option at ${fmtINR(best.cost)}`,equal?"Outcomes are effectively equal, so choosing on cost alone is appropriate.":"Outcomes differ between options: cost-minimisation may not be appropriate; consider a CEA or CUA.");return;
   }
   if(e.type==="CCA"){
     const rows=R.rows.map(s=>`<tr><td>${s.strategy}</td><td>${fmtINR(+s.cost)}</td><td>${fmtNum(+s.effect,2)}</td></tr>`).join("");
@@ -649,7 +651,7 @@ async function renderEval(){
       <div class="result-tabs" id="evTabs"><button class="result-tab active" data-p="table">Balance sheet</button><button class="result-tab" data-p="req">Requirements</button></div>
       <div class="pane active" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
       <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
-    wireTabs("evTabs");wireExports("Artha CCA");addInterp(R);return;
+    wireTabs("evTabs");wireExports("Artha CCA");addInterp(R);setVerdict("info","Costs and outcomes side by side","Cost-consequence analysis gives no single ratio: weigh each option's cost against its outcomes for your population and budget.");return;
   }
   /* CEA / CUA */
   const d=R.rows,best=R.best,pts=R.plane,unit=R.unit;
@@ -661,6 +663,9 @@ async function renderEval(){
     <div class="pane" data-pane="table"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Strategy</th><th>Cost</th><th>${unit==="QALY"?"QALYs":"Effect"}</th><th>Δ Cost</th><th>Δ Eff</th><th>ICER</th><th style="text-align:left">Status</th><th>NMB</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
     <div class="pane" data-pane="req">${reqCard(R.requirements,t.name)}</div>`;
   wireTabs("evTabs");wireExports("Artha "+e.type);addInterp(R);
+  {const ref=R.rows[0],pt=(R.plane||[]).find(p=>p.label===best.strategy)||{dEff:0,dCost:0};
+   if(best.strategy===ref.strategy){const nx=R.rows.find(r=>r.strategy!==ref.strategy&&r.status==="frontier"&&r.icer!=null);setVerdict("warn",`${escHTML(ref.strategy)} remains the best use of resources at ${atThreshold(R.wtp)}`,nx?`${escHTML(nx.strategy)} would cost ${fmtINR(nx.icer)} per ${unit}, above the threshold of ${fmtINR(R.wtp)}.`:"No alternative gives enough extra benefit for its extra cost.");}
+   else setVerdict("ok",`${escHTML(best.strategy)} is cost-effective at ${atThreshold(R.wtp)}`,`Compared with ${escHTML(ref.strategy)} it adds ${fmtNum(pt.dEff,2)} ${unit==="QALY"?"QALYs":"units of effect"} for ${fmtINR(pt.dCost)} more${best.icer!=null?`: ${fmtINR(best.icer)} per ${unit} against ${fmtINR(R.wtp)}`:""}.`);}
 }
 
 /* ============================ MODELING ============================ */
@@ -911,6 +916,7 @@ async function renderSens(){
       ${R.evppi&&R.evppi.length?`<div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th style="text-align:left">Parameter</th><th>EVPPI per patient</th>${R.popFactor>0?"<th>Population EVPPI</th>":""}</tr></thead><tbody>${R.evppi.map(e=>`<tr><td style="text-align:left;white-space:normal">${escHTML(e.parameter)}</td><td>${fmtINR(e.evppi)}</td>${R.popFactor>0?`<td>${compactINR(e.evppi*R.popFactor)}</td>`:""}</tr>`).join("")}</tbody></table></div><p class="note">Groups of up to four related parameters (e.g. one row of a transition matrix, one survival curve) are valued together. Parameters with a population EVPPI above the cost of a study are the ones worth researching.</p></div>`:""}</div>`+
     `<div class="pane" data-pane="evpi"><div class="card flush"><div class="pad"><h3>Expected value of perfect information</h3><div class="card-sub">Per patient, across thresholds, for the decision between all ${R.nStrategies} strategies. At ${compactINR(R.wtp)}: <b>${compactINR(R.evpiAll)}</b> per patient${R.popFactor>0?`; <b>${compactINR(R.popEvpi)}</b> for the population (${fmtNum(s.popPerYear,0)} patients a year for ${s.popYears} years, discounted at 3%). If further research would cost more than this, it is not worth doing.`:"; enter the patients affected per year and the years the decision applies (left) to get the population value."}</div>${evpiChart(R.evpiCurve)}</div></div></div>`);
   wireTabs("sTabs");wireExports("Artha Sensitivity");
+  setVerdict(R.pCE>=0.8?"ok":R.pCE>=0.5?"info":"warn",`${escHTML(R.cmpName)} is cost-effective in ${pct(R.pCE)} of simulations at ${atThreshold(R.wtp)}`,`Compared with ${escHTML(R.refName)}. ${R.pCE>=0.8?"The conclusion is robust to parameter uncertainty.":R.pCE>=0.5?"More likely than not, but with real uncertainty.":"Unlikely to be cost-effective at this threshold."} Expected value of perfect information: ${fmtINR(R.evpiAll)} per patient${R.popFactor>0?`, ${compactINR(R.popEvpi)} for the population`:""}.`);
 }
 
 /* ============================ BUDGET IMPACT ============================ */
@@ -946,6 +952,7 @@ async function renderBia(){
     <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>Net annual budget impact</h3><div class="card-sub">Additional spend vs staying on current treatment.</div>${barChartV(bars,compactINR)}</div></div></div>
     <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Year</th><th>Uptake</th><th>On new tx</th><th>Total spend</th><th>Net impact</th><th>Cumulative</th></tr></thead><tbody>${tr}</tbody></table></div></div></div>`;
   wireTabs("bTabs");wireExports("Artha Budget Impact");
+  {const pk=rows.reduce((a,r)=>r.impact>a.impact?r:a,rows[0]);setVerdict(totalImpact>0?"info":"ok",`${totalImpact>0?"Net budget impact":"Net savings"} of ${compactINR(Math.abs(totalImpact))} over ${b.horizon} years`,`${fmtNum(b.population*b.eligible,0)} eligible patients; ${totalImpact>0?`the largest annual impact is ${compactINR(pk.impact)} in ${pk.year}`:"adopting the new treatment saves money"}.`);}
 }
 
 /* ============================ PERSISTENCE ============================ */
@@ -1160,7 +1167,7 @@ function renderVb(){
       <div class="result-tabs" id="vbTabs"><button class="result-tab active" data-p="chart">By state</button><button class="result-tab" data-p="tbl">Breakdown</button></div>
       <div class="pane active" data-pane="chart"><div class="card flush"><div class="pad"><h3>QALY contribution by state</h3><div class="card-sub">How each health state adds to the total (discounted).</div>${barChartH(bars)}</div></div></div>
       <div class="pane" data-pane="tbl"><div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>State</th><th>Utility</th><th>Years</th><th>Disc. QALYs</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td>Total</td><td></td><td>${fmtNum(r.ly,1)}</td><td>${fmtNum(r.disc,3)}</td></tr></tfoot></table></div></div></div>`;
-    wireTabs("vbTabs");wireExports("Artha QALY Builder");markRun("vb");
+    wireTabs("vbTabs");wireExports("Artha QALY Builder");markRun("vb");setVerdict("info",`${fmtNum(r.disc,3)} discounted QALYs`,`${fmtNum(r.ly,1)} life-years at an average utility of ${fmtNum(r.undisc/(r.ly||1),2)}, discounted at ${pct(v.qaly.discount,0)}. Send it to Evaluation with “Use this result”.`);
     document.getElementById("qSend").onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(r.disc,2)+" QALY)",cost:0,effect:+r.disc.toFixed(3)});route("evaluation");};
     document.getElementById("workspace").insertAdjacentHTML("beforeend",interpCard([
       `A patient in these states accrues ${fmtNum(r.disc,3)} discounted QALYs (${fmtNum(r.ly,1)} life-years at an average utility of ${fmtNum(r.undisc/(r.ly||1),2)}).`,
@@ -1178,7 +1185,7 @@ function renderVb(){
       <div class="card"><div class="table-scroll"><table class="results-table"><thead><tr><th>Component</th><th>Value</th></tr></thead><tbody><tr><td>Baseline utility</td><td>${fmtNum(v.util.baseline,2)}</td></tr>${rows}<tr style="font-weight:700"><td>Net utility</td><td>${fmtNum(net,3)}</td></tr></tbody></table></div>
       <p class="note">Indicative catalogue values are starting points — confirm the utility for your exact condition, instrument and population from a published source.</p></div>`;
     markRun("vb");document.getElementById("workspace").insertAdjacentHTML("beforeend",(v.util.baseline>0?useCard("utility",net,"the net utility","Utility helper",x=>fmtNum(x,3)):"")+vbGuideCard("util")+vbRefsCard("util"));
-    wireExports("Artha Utility");
+    wireExports("Artha Utility");setVerdict("info",`Net utility ${fmtNum(net,3)}`,`Baseline ${fmtNum(v.util.baseline,2)} minus ${v.util.decs.length} disutilit${v.util.decs.length===1?"y":"ies"}. Use it as a state's utility in the model.`);
     return;
   }
   if(v.tool==="ly"){
@@ -1195,7 +1202,7 @@ function renderVb(){
         <tr><td>Restricted mean over ${L.T} yr</td><td>${fmtNum(L.rmst,3)} LY</td></tr>
         <tr><td>Discounted life-years (${pct(L.r,0)})</td><td>${fmtNum(L.discLY,3)} LY</td></tr>
       </tbody></table></div>`;
-    wireExports("Artha Life-years");
+    wireExports("Artha Life-years");setVerdict("info",`${fmtNum(L.discLY,3)} discounted life-years${L.util>0?` (${fmtNum(L.qaly,3)} QALYs)`:""}`,`Restricted to ${L.T} years under a constant hazard of ${fmtNum(L.lambda,4)} per year (median survival ${fmtNum(L.median,2)} years).`);
     document.getElementById("lSendQaly").onclick=()=>{v.qaly.rows.push({label:"Survival period",util:L.util>0?L.util:0.8,years:+L.discLY.toFixed(2)});v.tool="qaly";renderVbSidebar();renderVb();};
     const se=document.getElementById("lSendEval");if(se)se.onclick=()=>{state.evaluation.strats.push({strategy:"Option ("+fmtNum(L.qaly,2)+" QALY)",cost:0,effect:+L.qaly.toFixed(3)});route("evaluation");};
     markRun("vb");document.getElementById("workspace").insertAdjacentHTML("beforeend",(L.util>0?useCard("effect",L.qaly,"the discounted QALYs","Survival → life-years",x=>fmtNum(x,3)):useCard("effect",L.discLY,"the discounted life-years","Survival → life-years",x=>fmtNum(x,3)))+vbGuideCard("ly")+vbRefsCard("ly"));
@@ -1211,7 +1218,7 @@ function renderVb(){
     <div class="card"><h3>How this was derived</h3><p style="font-size:14px;line-height:1.6;color:var(--ink-soft)">${note}</p>
     <p class="note">Send it to a cell of the transition matrix below; the probability of staying in that state is adjusted so the row still sums to 1.</p></div>
     ${useCard("prob",out,"the per-cycle probability",title,x=>fmtNum(x,4))}${vbGuideCard("prob")}${vbRefsCard("prob")}`;
-  markRun("vb");
+  markRun("vb");setVerdict("info",`Per-cycle probability ${fmtNum(out,4)}`,`${title}. Send it to a cell of the transition matrix with “Use this result”; the stay-probability is adjusted so the row still sums to 1.`);
 }
 
 /* ============================ REFERENCE DATA (India / LMIC) ============================ */
@@ -1257,8 +1264,11 @@ function route(mod){
     bia:()=>{renderBiaSidebar();renderBia();},
     vb:()=>{renderVbSidebar();renderVb();},
     survival:()=>{renderSurvSidebar();renderSurv();}})[mod]();
+  syncSectionNum();
   saveLocal();
 }
+function syncSectionNum(){const nav=document.querySelector(`#topnav button[data-mod="${state.module}"] .n`),sn=document.querySelector("#sidebar .section-num");if(nav&&sn)sn.textContent=nav.textContent;}
+document.getElementById("sidebar")&&new MutationObserver(()=>syncSectionNum()).observe(document.getElementById("sidebar"),{childList:true});
 document.querySelectorAll("#topnav button").forEach(b=>b.onclick=()=>route(b.dataset.mod));
 // Active tab + a green dot on each step that has been run; keep the active tab visible in the strip.
 function syncNav(){
