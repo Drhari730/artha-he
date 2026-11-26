@@ -9,7 +9,7 @@
 <meta name="author" content="Dr G Hari Prakash">
 <link rel="apple-touch-icon" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,600&family=Source+Sans+3:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400;1,700&display=swap">
 <style>
 /* ============================ TOKENS ============================ */
 :root{
@@ -21,7 +21,7 @@
   --emerald:#1F7A63; --emerald-soft:#E8F4EF;
   --amber:#B45309; --red:#B91C1C; --red-soft:#FDECEC;
   --line:#CBD7E4; --line-soft:#E1E8F0;
-  --display:'Source Serif 4',Georgia,serif; --sans:'Source Sans 3',-apple-system,'Segoe UI',sans-serif; --mono:'Source Sans 3',-apple-system,'Segoe UI',sans-serif; --code:ui-monospace,'SF Mono',Consolas,monospace;
+  --display:'Lato',-apple-system,'Segoe UI',sans-serif; --sans:'Lato',-apple-system,'Segoe UI',sans-serif; --mono:'Lato',-apple-system,'Segoe UI',sans-serif; --code:ui-monospace,'SF Mono',Consolas,monospace;
   --shadow-sm:0 1px 2px rgba(15,23,42,.05); --shadow:0 1px 2px rgba(15,23,42,.04);
   --shadow-lg:0 24px 48px -24px rgba(15,23,42,.3); --radius:12px; --rail:212px;
 }
@@ -592,7 +592,7 @@ button:focus-visible,a:focus-visible,label.tbtn:focus-within,summary:focus-visib
 .card[style*="border-left"]{border-left:1px solid var(--line)!important;}
 .verdict.info .vi{background:#EEF2F6;color:var(--ink-soft);}
 .home .ws-head h2{font-size:34px;}
-/* ======================= DESIGN v6 · Clinical Classic (borders, colour, Source Serif + Source Sans) ======================= */
+/* ======================= DESIGN v6 · Clinical Classic (borders, colour, Lato) ======================= */
 body{font-feature-settings:normal;font-variant-numeric:tabular-nums;font-size:14.5px;background:var(--bg);}
 ::selection{background:#CFE0F3;}
 .eq .formula,code,pre{font-family:var(--code);}
@@ -728,7 +728,7 @@ footer.foot{font-family:var(--sans);}
 .lp-badge{border-radius:4px;background:#E8F4EF;border-color:#B8DCCD;color:#1F6E59;font-weight:600;}
 .lp-pulse{background:#1F8A70;}
 @keyframes lpPulse{0%{box-shadow:0 0 0 0 rgba(31,138,112,.5)}70%{box-shadow:0 0 0 10px rgba(31,138,112,0)}100%{box-shadow:0 0 0 0 rgba(31,138,112,0)}}
-.lp h1{font-weight:700;letter-spacing:-.015em;line-height:1.08;margin-top:0;}
+.lp h1{font-weight:900;letter-spacing:-.02em;line-height:1.08;margin-top:0;font-size:clamp(36px,4.3vw,54px);}
 .lp h1 em{color:var(--primary);}
 .lp-lead{color:var(--ink-soft);}
 .lp-trust{gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden;width:fit-content;max-width:100%;font-weight:600;color:var(--ink-soft);}
@@ -796,7 +796,7 @@ footer.foot{font-family:var(--sans);}
     <div class="brand" id="brandHome" title="Back to the home page"><div class="logo">अ</div><div class="name">Artha HE</div></div>
     <div class="crumb" id="hdrProject" title="Current project">Untitled project</div>
     <div class="topbar-tools">
-      <span class="savestate" aria-live="polite">autosaved · v6.0</span>
+      <span class="savestate" aria-live="polite">autosaved · v6.1</span>
       <button class="tbtn" id="newProj" title="Start a new, empty project" aria-label="New project">＋<span class="lbl"> New</span></button>
       <button class="tbtn" id="saveProj" title="Save your whole project to a file" aria-label="Save project">⤓<span class="lbl"> Save</span></button>
       <label class="tbtn" title="Load a saved project file" aria-label="Load project">⤒<span class="lbl"> Load</span><input type="file" id="loadProj" accept=".json" hidden></label>
