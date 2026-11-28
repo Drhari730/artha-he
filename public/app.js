@@ -9,9 +9,9 @@
 const RUPEE="₹", GDP_DEFAULT=243803; // India per-capita GDP, FY 2025-26 (PE), current prices, 2022-23 base: RBI Handbook Table 1 (NSO)
 let GDP_PC=GDP_DEFAULT; // per-capita GDP used for the 1× / 3× threshold markers; editable (state.settings.gdp)
 const COST_CATEGORIES=["Direct medical","Direct non-medical","Indirect (productivity)"];
-const C={primary:"#12263F",primaryL:"#2E4560",gold:"#B7832F",emerald:"#1F7A63",amber:"#B45309",red:"#B91C1C",ink:"#12263F",muted:"#4F6378",line:"#DCE5EF",teal:"#1F8A70",blue:"#0E4D92"};
+const C={primary:"#5B4BD6",primaryL:"#7261F0",gold:"#C8971F",emerald:"#0E9E78",amber:"#DD9430",red:"#DC4B4B",ink:"#1A1733",muted:"#6E6A86",line:"#E5E3F0",teal:"#0E9E78",blue:"#5B4BD6"};
 // Chart series: distinct in hue AND lightness so they stay apart for colour-blind readers.
-const SERIES=["#12263F","#1F8A70","#B45309","#2F6FBF","#BE185D","#64748B"];
+const SERIES=["#5B4BD6","#C8971F","#0E9E78","#DD9430","#DC4B4B","#6E6A86"];
 
 /* ---------- formatting ---------- */
 const fmtINR=(x,dp=0)=>RUPEE+Number(x).toLocaleString("en-IN",{minimumFractionDigits:dp,maximumFractionDigits:dp});
@@ -135,7 +135,7 @@ async function openReport(){
 
 /* ---------- SVG charts ---------- */
 function svgWrap(w,h,i){return`<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${i}</svg>`;}
-function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="Lato, sans-serif" font-weight="${o.weight||400}">${s}</text>`;}
+function txt(x,y,s,o={}){return`<text x="${x}" y="${y}" font-size="${o.size||12}" fill="${o.fill||C.muted}" text-anchor="${o.anchor||"start"}" font-family="Plus Jakarta Sans, sans-serif" font-weight="${o.weight||400}">${s}</text>`;}
 function barChartH(data){const W=660,rh=50,H=data.length*rh+28,padL=185,padR=120,max=Math.max(...data.map(d=>d.value),1),bw=W-padL-padR;let g="";
   data.forEach((d,i)=>{const y=16+i*rh,w=Math.max(2,(d.value/max)*bw);g+=`<rect x="${padL}" y="${y}" width="${w}" height="26" rx="6" fill="${d.color}"><title>${d.label}: ${d.tag}</title></rect>`;g+=txt(padL-12,y+18,d.label,{anchor:"end",fill:C.ink,size:12.5});g+=txt(padL+w+10,y+18,d.tag,{fill:C.muted,size:11.5,mono:true});});
   return svgWrap(W,H,g);}
@@ -327,7 +327,7 @@ function renderLanding(){
   document.getElementById("landing").innerHTML=`
   <div class="lp">
     <header class="lp-nav"><div class="lp-wrap lp-nav-in">
-      <a href="#" class="lp-brand" id="lpHome"><span class="lp-logo">अ</span><span>Artha HE</span></a>
+      <a href="#" class="lp-brand" id="lpHome"><span class="lp-logo">अ</span><span>Artha <span class="lp-he">HE</span></span></a>
       <nav aria-label="Main" class="lp-links"><a href="#lp-how">How it works</a><a href="#lp-features">Features</a><a href="#lp-validation">Validation</a><a href="#lp-data">India data</a></nav>
       <button class="lp-btn lp-dark" id="enterTop">Open the workbench</button>
     </div></header>
@@ -352,11 +352,11 @@ function renderLanding(){
               <div class="lp-rise lp-d5"><small>Δ QALYs</small><b>+1.370</b></div>
             </div>
             <svg viewBox="0 0 520 230" role="img" aria-label="Acceptability curve rising to 94 percent at the threshold">
-              <line x1="30" y1="200" x2="510" y2="200" stroke="#CBD7E4"/><line x1="30" y1="110" x2="510" y2="110" stroke="#F1F5F9"/><line x1="30" y1="20" x2="510" y2="20" stroke="#F1F5F9"/>
-              <line x1="263" y1="20" x2="263" y2="200" stroke="#1F8A70" stroke-dasharray="4 4" opacity=".6"/>
-              <polyline class="lp-draw" points="30,200 78,160 126,76.2 174,46.1 222,34.1 263,29.9 318,26.4 414,24.3 510,22.8" fill="none" stroke="#12263F" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
-              <circle class="lp-late" cx="263" cy="29.9" r="6" fill="#1F8A70"/><text class="lp-late" x="272" y="54" font-family="Lato" font-size="12" fill="#1F8A70">94.2% at 1× GDP</text>
-              <text x="510" y="222" text-anchor="end" font-family="Lato" font-size="11" fill="#475569">willingness to pay →</text>
+              <line x1="30" y1="200" x2="510" y2="200" stroke="#E5E3F0"/><line x1="30" y1="110" x2="510" y2="110" stroke="#F1F5F9"/><line x1="30" y1="20" x2="510" y2="20" stroke="#F1F5F9"/>
+              <line x1="263" y1="20" x2="263" y2="200" stroke="#0E9E78" stroke-dasharray="4 4" opacity=".6"/>
+              <polyline class="lp-draw" points="30,200 78,160 126,76.2 174,46.1 222,34.1 263,29.9 318,26.4 414,24.3 510,22.8" fill="none" stroke="#5B4BD6" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle class="lp-late" cx="263" cy="29.9" r="6" fill="#0E9E78"/><text class="lp-late" x="272" y="54" font-family="Plus Jakarta Sans" font-size="12" fill="#0E9E78">94.2% at 1× GDP</text>
+              <text x="510" y="222" text-anchor="end" font-family="Plus Jakarta Sans" font-size="11" fill="#475569">willingness to pay →</text>
             </svg>
           </div>
         </div>
@@ -382,7 +382,7 @@ function renderLanding(){
 
     <section class="lp-wrap lp-bento" id="lp-features">
       <article class="lp-card lp-span2"><div><div class="lp-eyebrow">Models</div><h3>Markov, partitioned survival and decision trees</h3><p>Treatment effects as hazard ratios, relative risks or odds ratios; state-specific costs and utilities; half-cycle or Simpson's correction.</p></div>
-        <svg viewBox="0 0 300 180" role="img" aria-label="Survival curves for two strategies"><line x1="10" y1="165" x2="290" y2="165" stroke="#CBD7E4"/><path class="lp-draw" d="M10 15 C 60 30, 90 110, 150 140 S 250 162, 290 163" fill="none" stroke="#12263F" stroke-width="2.4"/><path class="lp-draw" d="M10 15 C 80 25, 120 95, 180 128 S 260 158, 290 160" fill="none" stroke="#1F8A70" stroke-width="2.4"/><path d="M10 15 C 40 60, 60 125, 110 150 S 230 164, 290 164" fill="none" stroke="#12263F" stroke-width="2" stroke-dasharray="6 5"/><text x="196" y="118" font-family="Lato" font-size="11" fill="#1F8A70">New drug · OS</text><text x="40" y="150" font-family="Lato" font-size="11" fill="#475569">PFS</text></svg></article>
+        <svg viewBox="0 0 300 180" role="img" aria-label="Survival curves for two strategies"><line x1="10" y1="165" x2="290" y2="165" stroke="#E5E3F0"/><path class="lp-draw" d="M10 15 C 60 30, 90 110, 150 140 S 250 162, 290 163" fill="none" stroke="#5B4BD6" stroke-width="2.4"/><path class="lp-draw" d="M10 15 C 80 25, 120 95, 180 128 S 260 158, 290 160" fill="none" stroke="#0E9E78" stroke-width="2.4"/><path d="M10 15 C 40 60, 60 125, 110 150 S 230 164, 290 164" fill="none" stroke="#5B4BD6" stroke-width="2" stroke-dasharray="6 5"/><text x="196" y="118" font-family="Plus Jakarta Sans" font-size="11" fill="#0E9E78">New drug · OS</text><text x="40" y="150" font-family="Plus Jakarta Sans" font-size="11" fill="#475569">PFS</text></svg></article>
       <article class="lp-card lp-darkcard"><div class="lp-eyebrow lp-gold">Survival</div><h3>Curves from a published Kaplan–Meier plot</h3><p>Paste the digitised points and the numbers at risk; Artha rebuilds patient-level data (Guyot 2012) and fits five distributions by AIC.</p></article>
       <article class="lp-card"><div class="lp-eyebrow">Uncertainty</div><h3>Results you can defend</h3><p>Probabilistic analysis with a fixed seed, acceptability curves for every strategy, EVPI and EVPPI, and a tornado with ranges from your confidence intervals.</p></article>
       <article class="lp-card" id="lp-data"><div class="lp-eyebrow">India data</div><h3>Verified reference values, built in</h3><p>GDP per capita (RBI/NSO), CPI-IW, SRS 2020-24 life tables and CGHS rates, each with its source and a verified flag.</p></article>

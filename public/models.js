@@ -5,7 +5,7 @@
    Loaded after app.js; shares its globals.
    ============================================================================= */
 
-const SURV_COLORS=["#1F8A70","#B45309","#2F6FBF","#BE185D","#64748B"];
+const SURV_COLORS=["#C8971F","#0E9E78","#5B4BD6","#DD9430","#DC4B4B"];
 const SURV_LABEL={exponential:"Exponential",weibull:"Weibull",gompertz:"Gompertz",llogis:"Log-logistic",lnorm:"Log-normal"};
 const SURV_PARAMS={exponential:["rate"],weibull:["shape","scale"],gompertz:["shape","rate"],llogis:["shape","scale"],lnorm:["meanlog","sdlog"]};
 const UNITS={days:"days",weeks:"weeks",months:"months",years:"years"};
