@@ -367,27 +367,27 @@ function renderLanding(){
 
     <section class="lp-ticker" aria-label="Methods covered"><div class="lp-ticker-in">${methods.concat(methods).map(m=>`<span>${m}</span>`).join("")}</div></section>
 
-    <section class="lp-wrap lp-facts">
+    <div class="lp-blk lp-blk-white"><section class="lp-wrap lp-facts">
       <div class="lp-rise lp-d1"><b>207</b><span>SRS life tables: India and 22 states, by sex and residence</span></div>
       <div class="lp-rise lp-d2"><b>3</b><span>model types: Markov, partitioned survival, decision tree</span></div>
       <div class="lp-rise lp-d3"><b>28</b><span>CHEERS 2022 items tracked as you work</span></div>
       <div class="lp-rise lp-d4"><b>${compactINR(GDP_PC).replace(".00","")}</b><span>default threshold: 1× GDP per capita</span></div>
-    </section>
+    </section></div>
 
-    <section class="lp-wrap lp-sec" id="lp-how">
+    <div class="lp-blk lp-blk-lav"><section class="lp-wrap lp-sec" id="lp-how">
       <div class="lp-sec-head"><div><div class="lp-eyebrow">How it works</div><h2>One flow. Seven steps.<br>Nothing typed twice.</h2></div>
         <p>Every result has a “Use this result” button that sends it to the step that needs it, and Artha records where each value came from for the report.</p></div>
       <div class="lp-steps"><div class="lp-line"></div>${steps.map((x,i)=>`<div class="lp-step lp-rise lp-d${i+1}"><div class="lp-num ${i===0?"on":i===6?"end":""}">${x[0]}</div><b>${x[1]}</b><span>${x[2]}</span></div>`).join("")}</div>
-    </section>
+    </section></div>
 
-    <section class="lp-wrap lp-bento" id="lp-features">
+    <div class="lp-blk lp-blk-plain"><section class="lp-wrap lp-bento" id="lp-features"><div class="lp-bento-head"><div class="lp-eyebrow">Features</div><h2>Everything an evaluation needs</h2></div>
       <article class="lp-card lp-span2"><div><div class="lp-eyebrow">Models</div><h3>Markov, partitioned survival and decision trees</h3><p>Treatment effects as hazard ratios, relative risks or odds ratios; state-specific costs and utilities; half-cycle or Simpson's correction.</p></div>
         <svg viewBox="0 0 300 180" role="img" aria-label="Survival curves for two strategies"><line x1="10" y1="165" x2="290" y2="165" stroke="#E5E3F0"/><path class="lp-draw" d="M10 15 C 60 30, 90 110, 150 140 S 250 162, 290 163" fill="none" stroke="#5B4BD6" stroke-width="2.4"/><path class="lp-draw" d="M10 15 C 80 25, 120 95, 180 128 S 260 158, 290 160" fill="none" stroke="#0E9E78" stroke-width="2.4"/><path d="M10 15 C 40 60, 60 125, 110 150 S 230 164, 290 164" fill="none" stroke="#5B4BD6" stroke-width="2" stroke-dasharray="6 5"/><text x="196" y="118" font-family="Plus Jakarta Sans" font-size="11" fill="#0E9E78">New drug · OS</text><text x="40" y="150" font-family="Plus Jakarta Sans" font-size="11" fill="#475569">PFS</text></svg></article>
       <article class="lp-card lp-darkcard"><div class="lp-eyebrow lp-gold">Survival</div><h3>Curves from a published Kaplan–Meier plot</h3><p>Paste the digitised points and the numbers at risk; Artha rebuilds patient-level data (Guyot 2012) and fits five distributions by AIC.</p></article>
       <article class="lp-card"><div class="lp-eyebrow">Uncertainty</div><h3>Results you can defend</h3><p>Probabilistic analysis with a fixed seed, acceptability curves for every strategy, EVPI and EVPPI, and a tornado with ranges from your confidence intervals.</p></article>
       <article class="lp-card" id="lp-data"><div class="lp-eyebrow">India data</div><h3>Verified reference values, built in</h3><p>GDP per capita (RBI/NSO), CPI-IW, SRS 2020-24 life tables and CGHS rates, each with its source and a verified flag.</p></article>
       <article class="lp-card"><div class="lp-eyebrow">Report</div><h3>A report that writes itself</h3><p>Decision problem, inputs, results, scenarios and the CHEERS 2022 checklist, ready to print or download as Word.</p></article>
-    </section>
+    </section></div>
 
     <section class="lp-band" id="lp-validation"><div class="lp-wrap lp-val">
       <div><div class="lp-eyebrow">Validation</div><h2>Matches the published model to the dollar.</h2>
@@ -398,12 +398,12 @@ function renderLanding(){
         <tr><td>Strategy B</td><td>$260,222</td><td>$260,222</td><td>22.50</td></tr><tr><td>Strategy AB</td><td>$380,378</td><td>$380,378</td><td>23.46</td></tr></tbody></table></div>
     </div></section>
 
-    <section class="lp-wrap lp-sec">
+    <div class="lp-blk lp-blk-gold"><section class="lp-wrap lp-sec">
       <h2>Built for the people who do the work</h2>
       <div class="lp-aud"><div class="lp-card"><b>Researchers</b><p>Publication-ready tables and figures, with every input traceable to its source.</p></div><div class="lp-card"><b>Teaching</b><p>Worked examples and plain-language interpretation under every result.</p></div><div class="lp-card"><b>HTA &amp; payers</b><p>The India reference case, scenario analysis and budget impact in one place.</p></div></div>
-    </section>
+    </section></div>
 
-    <section class="lp-wrap"><div class="lp-final"><div><h2>Start your assessment.</h2><p>Nothing to install: open it in your browser.</p></div><button class="lp-btn lp-white lp-lg" id="enterBottom">Open the workbench</button></div></section>
+    <div class="lp-blk lp-blk-plain lp-blk-last"><section class="lp-wrap"><div class="lp-final"><div><h2>Start your assessment.</h2><p>Nothing to install: open it in your browser.</p></div><button class="lp-btn lp-white lp-lg" id="enterBottom">Open the workbench</button></div></section></div>
     <footer class="lp-foot"><div class="lp-wrap"><span>Artha HE · developed by Dr G Hari Prakash</span><span>For research, teaching and health technology assessment. Verify inputs before formal use.</span></div></footer>
   </div>`;
   const enter=()=>enterApp("project");
